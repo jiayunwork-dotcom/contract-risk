@@ -201,7 +201,7 @@ public class ContractVersionController {
     @PostMapping("/tags")
     public ApiResponse<VersionTagDTO> createTag(@RequestBody CreateTagRequest request) {
         try {
-            VersionTagDTO tag = versionService.createTag(request.getName(), request.getColor());
+            VersionTagDTO tag = versionService.createTag(request.getName(), request.getColor(), request.getPredefined());
             return ApiResponse.success("标签创建成功", tag);
         } catch (IllegalArgumentException e) {
             return ApiResponse.error(e.getMessage());

@@ -977,10 +977,6 @@ def show_rules_page():
                 else:
                     st.error("保存失败，请重试")
 
-if __name__ == "__main__":
-    main()
-
-
 def show_version_management_page():
     st.markdown('<p class="main-header">🔄 合同版本管理与变更追踪</p>', unsafe_allow_html=True)
 
@@ -1733,4 +1729,8 @@ def show_audit_log_page():
                         st.rerun()
         else:
             st.error("查询审计日志失败")
+
+
+if __name__ == "__main__":
+    main()
 

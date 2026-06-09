@@ -11,4 +11,5 @@ public class CreateTagRequest {
 
     private String name;
     private String color;
+    private Boolean predefined;
 }

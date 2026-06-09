@@ -347,14 +347,14 @@ public class ContractVersionService {
     }
 
     @Transactional
-    public VersionTagDTO createTag(String name, String color) {
+    public VersionTagDTO createTag(String name, String color, Boolean predefined) {
         if (tagRepository.existsByNameAndDeletedFalse(name)) {
             throw new IllegalArgumentException("标签名称已存在: " + name);
         }
         VersionTag tag = new VersionTag();
         tag.setName(name);
         tag.setColor(color != null ? color : "#3498db");
-        tag.setPredefined(false);
+        tag.setPredefined(predefined != null && predefined);
         tag = tagRepository.save(tag);
         return new VersionTagDTO(tag.getId(), tag.getName(), tag.getColor(), tag.isPredefined());
     }
