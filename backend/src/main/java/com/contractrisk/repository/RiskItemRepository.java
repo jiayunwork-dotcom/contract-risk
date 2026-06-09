@@ -27,4 +27,6 @@ public interface RiskItemRepository extends JpaRepository<RiskItem, Long> {
     long countByContractId(@Param("contractId") Long contractId);
 
     void deleteByClauseContractId(Long contractId);
+
+    void deleteByClauseId(Long clauseId);
 }

@@ -1,19 +1,19 @@
 package com.contractrisk.controller;
 
-import com.contractrisk.dto.ApiResponse;
-import com.contractrisk.dto.ChangeImpactReport;
-import com.contractrisk.dto.ClauseDiffResponse;
-import com.contractrisk.dto.VersionTimelineResponse;
-import com.contractrisk.entity.ContractClause;
+import com.contractrisk.dto.*;
 import com.contractrisk.entity.ContractVersion;
-import com.contractrisk.entity.RiskReport;
 import com.contractrisk.entity.enums.OperationType;
 import com.contractrisk.service.AuditLogService;
 import com.contractrisk.service.ChangeTrackingService;
 import com.contractrisk.service.ContractVersionService;
+import com.contractrisk.service.PdfExportService;
 import com.contractrisk.service.RiskAnalysisService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.HttpStatus;
+import org.springframework.http.MediaType;
+import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 
@@ -32,6 +32,7 @@ public class ContractVersionController {
     private final ChangeTrackingService changeTrackingService;
     private final RiskAnalysisService riskAnalysisService;
     private final AuditLogService auditLogService;
+    private final PdfExportService pdfExportService;
 
     @PostMapping("/{contractId}/upload")
     public ApiResponse<ContractVersion> uploadNewVersion(
@@ -103,19 +104,19 @@ public class ContractVersionController {
     }
 
     @GetMapping("/{versionId}/clauses")
-    public ApiResponse<List<ContractClause>> getVersionClauses(@PathVariable Long versionId) {
-        List<ContractClause> clauses = versionService.getVersionClauses(versionId);
+    public ApiResponse<List<com.contractrisk.entity.ContractClause>> getVersionClauses(@PathVariable Long versionId) {
+        List<com.contractrisk.entity.ContractClause> clauses = versionService.getVersionClauses(versionId);
         return ApiResponse.success(clauses);
     }
 
     @GetMapping("/{versionId}/risk-report")
-    public ApiResponse<RiskReport> getVersionRiskReport(@PathVariable Long versionId) {
+    public ApiResponse<com.contractrisk.entity.RiskReport> getVersionRiskReport(@PathVariable Long versionId) {
         Optional<ContractVersion> versionOpt = versionService.getVersionById(versionId);
         if (versionOpt.isEmpty()) {
             return ApiResponse.error("版本不存在");
         }
         ContractVersion version = versionOpt.get();
-        Optional<RiskReport> report = riskAnalysisService.getReportByVersionId(versionId);
+        Optional<com.contractrisk.entity.RiskReport> report = riskAnalysisService.getReportByVersionId(versionId);
         return report
                 .map(r -> ApiResponse.success(r))
                 .orElseGet(() -> ApiResponse.error("该版本暂无风险报告，请先执行风险分析"));
@@ -163,5 +164,100 @@ public class ContractVersionController {
         } catch (IllegalArgumentException e) {
             return ApiResponse.error(e.getMessage());
         }
+    }
+
+    @PostMapping("/{contractId}/batch-delete")
+    public ResponseEntity<ApiResponse<Void>> batchDeleteVersions(
+            @PathVariable Long contractId,
+            @RequestBody BatchDeleteRequest request) {
+        try {
+            versionService.batchDeleteVersions(contractId, request.getVersionIds(), request.getOperatedBy());
+            return ResponseEntity.ok(ApiResponse.success("批量删除成功", null));
+        } catch (IllegalArgumentException e) {
+            return ResponseEntity.status(HttpStatus.BAD_REQUEST)
+                    .body(ApiResponse.error(e.getMessage()));
+        }
+    }
+
+    @PutMapping("/{versionId}/note")
+    public ApiResponse<ContractVersion> updateVersionNote(
+            @PathVariable Long versionId,
+            @RequestBody VersionNoteRequest request) {
+        try {
+            ContractVersion updated = versionService.updateVersionNote(
+                    versionId, request.getVersionNote(), request.getOperatedBy());
+            return ApiResponse.success("备注更新成功", updated);
+        } catch (IllegalArgumentException e) {
+            return ApiResponse.error(e.getMessage());
+        }
+    }
+
+    @GetMapping("/tags")
+    public ApiResponse<List<VersionTagDTO>> getAllTags() {
+        List<VersionTagDTO> tags = versionService.getAllTags();
+        return ApiResponse.success(tags);
+    }
+
+    @PostMapping("/tags")
+    public ApiResponse<VersionTagDTO> createTag(@RequestBody CreateTagRequest request) {
+        try {
+            VersionTagDTO tag = versionService.createTag(request.getName(), request.getColor());
+            return ApiResponse.success("标签创建成功", tag);
+        } catch (IllegalArgumentException e) {
+            return ApiResponse.error(e.getMessage());
+        }
+    }
+
+    @DeleteMapping("/tags/{tagId}")
+    public ApiResponse<Void> deleteTag(@PathVariable Long tagId) {
+        try {
+            versionService.deleteTag(tagId);
+            return ApiResponse.success("标签删除成功", null);
+        } catch (IllegalArgumentException e) {
+            return ApiResponse.error(e.getMessage());
+        }
+    }
+
+    @PutMapping("/{versionId}/tags")
+    public ApiResponse<List<VersionTagDTO>> setVersionTags(
+            @PathVariable Long versionId,
+            @RequestBody VersionTagsRequest request) {
+        try {
+            List<VersionTagDTO> tags = versionService.setVersionTags(versionId, request.getTagIds());
+            return ApiResponse.success("标签设置成功", tags);
+        } catch (IllegalArgumentException e) {
+            return ApiResponse.error(e.getMessage());
+        }
+    }
+
+    @GetMapping("/{versionId}/tags")
+    public ApiResponse<List<VersionTagDTO>> getVersionTags(@PathVariable Long versionId) {
+        List<VersionTagDTO> tags = versionService.getVersionTags(versionId);
+        return ApiResponse.success(tags);
+    }
+
+    @GetMapping("/{contractId}/comparison-export-pdf")
+    public ResponseEntity<byte[]> exportComparisonPdf(
+            @PathVariable Long contractId,
+            @RequestParam Integer fromVersion,
+            @RequestParam Integer toVersion) {
+        try {
+            byte[] pdfBytes = pdfExportService.exportComparisonPdf(contractId, fromVersion, toVersion);
+            HttpHeaders headers = new HttpHeaders();
+            headers.setContentType(MediaType.APPLICATION_PDF);
+            headers.setContentDispositionFormData("attachment",
+                    "comparison_" + fromVersion + "_to_" + toVersion + ".pdf");
+            headers.setContentLength(pdfBytes.length);
+            return new ResponseEntity<>(pdfBytes, headers, HttpStatus.OK);
+        } catch (Exception e) {
+            log.error("导出对比PDF失败", e);
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).build();
+        }
+    }
+
+    @PostMapping("/init-tags")
+    public ApiResponse<Void> initPredefinedTags() {
+        versionService.initPredefinedTags();
+        return ApiResponse.success("预定义标签初始化完成", null);
     }
 }

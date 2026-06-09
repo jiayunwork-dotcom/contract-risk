@@ -984,8 +984,12 @@ if __name__ == "__main__":
 def show_version_management_page():
     st.markdown('<p class="main-header">🔄 合同版本管理与变更追踪</p>', unsafe_allow_html=True)
 
-    tab_versions, tab_upload, tab_diff, tab_impact = st.tabs([
-        "📋 版本时间线", "📤 上传新版本", "📊 变更详情", "🎯 影响评估"
+    if "vm_init_tags" not in st.session_state:
+        api_call("POST", "/versions/init-tags")
+        st.session_state["vm_init_tags"] = True
+
+    tab_versions, tab_upload, tab_compare, tab_diff, tab_impact = st.tabs([
+        "📋 版本时间线", "📤 上传新版本", "⚖️ 版本对比", "📊 变更详情", "🎯 影响评估"
     ])
 
     with tab_versions:
@@ -1010,11 +1014,129 @@ def show_version_management_page():
                         st.markdown(f"**合同:** {data.get('contractTitle')} | **当前版本:** v{data.get('currentVersionNumber')}")
 
                         st.markdown("---")
+                        st.markdown('<p class="sub-header">🔧 批量操作</p>', unsafe_allow_html=True)
+
+                        all_tags = api_call("GET", "/versions/tags")
+                        available_tags = all_tags.get("data", []) if all_tags and all_tags.get("success") else []
+
+                        col_b1, col_b2, col_b3 = st.columns([1, 1, 1])
+                        with col_b1:
+                            compare_ids = []
+                            for v in versions:
+                                cb_key = f"cmp_{v.get('versionId')}"
+                                if st.checkbox(f"对比 {v.get('versionLabel')}", key=cb_key):
+                                    compare_ids.append(v.get('versionId'))
+                            if len(compare_ids) == 2:
+                                st.session_state["vm_compare_ids"] = compare_ids
+                                st.session_state["vm_compare_contract"] = contract_id
+                                st.success(f"已选择 {len(compare_ids)} 个版本进行对比，请切换到「版本对比」标签页查看")
+                            elif len(compare_ids) > 2:
+                                st.warning("⚠️ 最多选择2个版本进行对比")
+                        with col_b2:
+                            delete_ids = []
+                            current_version_id = None
+                            for v in versions:
+                                if v.get("isCurrent"):
+                                    current_version_id = v.get("versionId")
+                                cb_key = f"del_{v.get('versionId')}"
+                                if st.checkbox(f"删除 {v.get('versionLabel')}", key=cb_key):
+                                    if v.get("isCurrent"):
+                                        st.toast(f"⚠️ 当前版本 {v.get('versionLabel')} 不允许删除，已自动取消勾选", icon="🚫")
+                                    else:
+                                        delete_ids.append(v.get('versionId'))
+                            st.session_state["vm_delete_ids"] = delete_ids
+                            if delete_ids:
+                                delete_labels = []
+                                for v in versions:
+                                    if v.get("versionId") in delete_ids:
+                                        delete_labels.append(v.get("versionLabel"))
+                                st.warning(f"将删除: {', '.join(delete_labels)}")
+                                if st.button("🗑️ 批量删除", key="batch_del_btn"):
+                                    delete_version_labels = []
+                                    for v in versions:
+                                        if v.get("versionId") in delete_ids:
+                                            delete_version_labels.append(v.get("versionLabel"))
+                                    st.session_state["vm_delete_confirm"] = True
+                                    st.session_state["vm_delete_labels"] = delete_version_labels
+                        with col_b3:
+                            if st.button("🏷️ 管理标签", key="manage_tags_btn"):
+                                st.session_state["vm_show_tag_manager"] = not st.session_state.get("vm_show_tag_manager", False)
+
+                        if st.session_state.get("vm_show_tag_manager"):
+                            st.markdown("---")
+                            st.markdown('<p class="sub-header">🏷️ 标签管理</p>', unsafe_allow_html=True)
+                            if available_tags:
+                                tag_cols = st.columns(min(len(available_tags), 5))
+                                for i, tag in enumerate(available_tags):
+                                    with tag_cols[i % len(tag_cols)]:
+                                        del_btn = False
+                                        if not tag.get("predefined"):
+                                            del_btn = st.button("🗑️", key=f"del_tag_{tag.get('id')}")
+                                        st.markdown(
+                                            f'<span style="display:inline-block;padding:2px 10px;border-radius:12px;'
+                                            f'background-color:{tag.get("color")};color:white;font-size:12px;">'
+                                            f'{tag.get("name")}</span>',
+                                            unsafe_allow_html=True
+                                        )
+                                        if del_btn:
+                                            result = api_call("DELETE", f"/versions/tags/{tag.get('id')}")
+                                            if result and result.get("success"):
+                                                st.success(f"✅ 标签 '{tag.get('name')}' 已删除")
+                                                st.rerun()
+                            col_new_tag_name, col_new_tag_color, col_new_tag_btn = st.columns([2, 1, 1])
+                            with col_new_tag_name:
+                                new_tag_name = st.text_input("新标签名称", key="new_tag_name_input")
+                            with col_new_tag_color:
+                                new_tag_color = st.color_picker("颜色", value="#3498db", key="new_tag_color_input")
+                            with col_new_tag_btn:
+                                st.markdown("<br>", unsafe_allow_html=True)
+                                if st.button("➕ 创建标签", key="create_tag_btn"):
+                                    if new_tag_name:
+                                        result = api_call("POST", "/versions/tags", json={"name": new_tag_name, "color": new_tag_color})
+                                        if result and result.get("success"):
+                                            st.success(f"✅ 标签 '{new_tag_name}' 创建成功")
+                                            st.rerun()
+
+                        if st.session_state.get("vm_delete_confirm"):
+                            st.markdown("---")
+                            labels = st.session_state.get("vm_delete_labels", [])
+                            st.error(f"⚠️ 确认删除以下版本？此操作不可恢复！\n\n**版本列表:** {', '.join(labels)}")
+                            col_confirm, col_cancel = st.columns(2)
+                            with col_confirm:
+                                if st.button("✅ 确认删除", type="primary", key="confirm_del_btn"):
+                                    result = api_call("POST",
+                                        f"/versions/{contract_id}/batch-delete",
+                                        json={"versionIds": st.session_state.get("vm_delete_ids", []), "operatedBy": "demo_user"})
+                                    if result and result.get("success"):
+                                        st.success("✅ 批量删除成功！")
+                                        st.session_state["vm_delete_confirm"] = False
+                                        st.session_state["vm_delete_ids"] = []
+                                        for v in versions:
+                                            st.session_state.pop(f"del_{v.get('versionId')}", None)
+                                        st.rerun()
+                                    else:
+                                        st.error(f"删除失败: {result.get('message', '未知错误') if result else '未知错误'}")
+                            with col_cancel:
+                                if st.button("❌ 取消", key="cancel_del_btn"):
+                                    st.session_state["vm_delete_confirm"] = False
+                                    st.rerun()
+
+                        st.markdown("---")
                         st.markdown('<p class="sub-header">📅 版本时间线</p>', unsafe_allow_html=True)
 
                         for v in versions:
                             is_current = v.get("isCurrent", False)
                             current_badge = " 🔵 **[当前版本]**" if is_current else ""
+
+                            tags_html = ""
+                            version_tags = v.get("tags", [])
+                            if version_tags:
+                                for tag in version_tags:
+                                    tags_html += (
+                                        f'<span style="display:inline-block;padding:1px 8px;border-radius:10px;'
+                                        f'background-color:{tag.get("color")};color:white;font-size:11px;'
+                                        f'margin-right:4px;">{tag.get("name")}</span>'
+                                    )
 
                             col1, col2, col3 = st.columns([2, 2, 1])
                             with col1:
@@ -1023,7 +1145,8 @@ def show_version_management_page():
                                     f'**{v.get("versionLabel")}**{current_badge}<br>'
                                     f'上传人: {v.get("uploadedBy", "N/A")} | '
                                     f'时间: {v.get("uploadTime", "")[:19] if v.get("uploadTime") else ""}<br>'
-                                    f'备注: {v.get("versionNote", "")}</div>',
+                                    f'备注: {v.get("versionNote", "")}<br>'
+                                    f'{tags_html}</div>',
                                     unsafe_allow_html=True
                                 )
                             with col2:
@@ -1058,10 +1181,65 @@ def show_version_management_page():
                                         else:
                                             st.error(f"回滚失败: {result.get('message', '未知错误') if result else '未知错误'}")
 
+                                tag_key = f"tag_v_{v.get('versionId')}"
+                                if st.button(f"🏷️ 标签", key=tag_key):
+                                    st.session_state["vm_tag_version"] = v.get("versionId")
+
+                        if st.session_state.get("vm_tag_version"):
+                            tag_vid = st.session_state["vm_tag_version"]
+                            st.markdown("---")
+                            st.markdown(f'<p class="sub-header">🏷️ 设置版本标签 (版本ID: {tag_vid})</p>', unsafe_allow_html=True)
+                            current_tags = api_call("GET", f"/versions/{tag_vid}/tags")
+                            current_tag_ids = []
+                            if current_tags and current_tags.get("success"):
+                                current_tag_ids = [t.get("id") for t in current_tags.get("data", [])]
+
+                            if available_tags:
+                                selected_tag_names = st.multiselect(
+                                    "选择标签",
+                                    options=[t.get("id") for t in available_tags],
+                                    default=current_tag_ids,
+                                    format_func=lambda tid: next((t.get("name") for t in available_tags if t.get("id") == tid), str(tid)),
+                                    key=f"select_tags_{tag_vid}"
+                                )
+                                if st.button("💾 保存标签", key=f"save_tags_{tag_vid}"):
+                                    result = api_call("PUT", f"/versions/{tag_vid}/tags", json={"tagIds": selected_tag_names})
+                                    if result and result.get("success"):
+                                        st.success("✅ 标签更新成功")
+                                        st.session_state["vm_tag_version"] = None
+                                        st.rerun()
+
                         if "selected_version_id" in st.session_state and st.session_state.get("selected_version_contract") == contract_id:
                             vid = st.session_state["selected_version_id"]
                             st.markdown("---")
-                            st.markdown('<p class="sub-header">📋 版本条款</p>', unsafe_allow_html=True)
+                            st.markdown('<p class="sub-header">📋 版本条款与备注</p>', unsafe_allow_html=True)
+
+                            version_detail = api_call("GET", f"/versions/detail/{vid}")
+                            if version_detail and version_detail.get("success"):
+                                vd = version_detail.get("data", {})
+                                note_key = f"note_edit_{vid}"
+                                current_note = vd.get("versionNote", "") or ""
+
+                                col_note_1, col_note_2 = st.columns([3, 1])
+                                with col_note_1:
+                                    st.markdown("**版本备注 (支持HTML格式):**")
+                                    note_text = st.text_area(
+                                        "备注内容",
+                                        value=current_note,
+                                        key=note_key,
+                                        height=120,
+                                        help="支持HTML标签: <b>加粗</b> <i>斜体</i> <ul><li>列表项</li></ul>"
+                                    )
+                                with col_note_2:
+                                    st.markdown("**预览:**")
+                                    st.markdown(note_text, unsafe_allow_html=True)
+                                    if st.button("💾 保存备注", key=f"save_note_{vid}"):
+                                        result = api_call("PUT", f"/versions/{vid}/note",
+                                            json={"versionNote": note_text, "operatedBy": "demo_user"})
+                                        if result and result.get("success"):
+                                            st.success("✅ 备注更新成功")
+                                            st.rerun()
+
                             clauses = api_call("GET", f"/versions/{vid}/clauses")
                             if clauses and clauses.get("success"):
                                 for c in clauses.get("data", []):
@@ -1106,6 +1284,187 @@ def show_version_management_page():
                                 st.success(f"✅ 新版本上传成功！版本: {vdata.get('versionLabel')}")
                             else:
                                 st.error(f"上传失败: {result.get('message', '未知错误') if result else '未知错误'}")
+
+    with tab_compare:
+        st.markdown('<p class="sub-header">⚖️ 版本对比可视化</p>', unsafe_allow_html=True)
+
+        compare_ids = st.session_state.get("vm_compare_ids", [])
+        compare_contract = st.session_state.get("vm_compare_contract")
+
+        if not compare_ids or len(compare_ids) != 2 or compare_contract is None:
+            st.info("请先在「版本时间线」标签页勾选2个版本进行对比")
+        else:
+            contract_id_cmp = compare_contract
+
+            versions_resp = api_call("GET", f"/versions/{contract_id_cmp}/versions")
+            if versions_resp and versions_resp.get("success"):
+                version_list = versions_resp.get("data", [])
+                v_map = {v.get("id"): v for v in version_list}
+
+                v1 = v_map.get(compare_ids[0])
+                v2 = v_map.get(compare_ids[1])
+
+                if v1 and v2:
+                    from_num = min(v1.get("versionNumber"), v2.get("versionNumber"))
+                    to_num = max(v1.get("versionNumber"), v2.get("versionNumber"))
+                    from_label = v1.get("versionLabel") if v1.get("versionNumber") == from_num else v2.get("versionLabel")
+                    to_label = v2.get("versionLabel") if v2.get("versionNumber") == to_num else v1.get("versionLabel")
+
+                    st.info(f"对比: **{from_label}** → **{to_label}**")
+
+                    if st.button("🔍 开始对比", type="primary", key="start_compare_btn"):
+                        with st.spinner("正在生成对比数据..."):
+                            diff_result = api_call("GET",
+                                f"/versions/{contract_id_cmp}/diff",
+                                params={"fromVersion": from_num, "toVersion": to_num})
+
+                            if diff_result and diff_result.get("success"):
+                                st.session_state["vm_compare_result"] = diff_result.get("data", {})
+                                st.session_state["vm_compare_contract_id"] = contract_id_cmp
+                                st.session_state["vm_compare_from"] = from_num
+                                st.session_state["vm_compare_to"] = to_num
+
+            if "vm_compare_result" in st.session_state:
+                cmp_data = st.session_state["vm_compare_result"]
+                cmp_contract_id = st.session_state.get("vm_compare_contract_id", contract_id_cmp)
+                cmp_from = st.session_state.get("vm_compare_from")
+                cmp_to = st.session_state.get("vm_compare_to")
+
+                st.markdown("---")
+                st.markdown('<p class="sub-header">📊 汇总统计</p>', unsafe_allow_html=True)
+
+                added_count = cmp_data.get("addedClausesCount", 0)
+                removed_count = cmp_data.get("removedClausesCount", 0)
+                modified_count = cmp_data.get("modifiedClausesCount", 0)
+
+                impact_result = api_call("GET",
+                    f"/versions/{cmp_contract_id}/impact",
+                    params={"fromVersion": cmp_from, "toVersion": cmp_to})
+
+                risk_score_change = None
+                if impact_result and impact_result.get("success"):
+                    risk_score_change = impact_result.get("data", {}).get("riskScoreChange")
+
+                col_s1, col_s2, col_s3, col_s4 = st.columns(4)
+                with col_s1:
+                    st.markdown(
+                        f'<div id="stat-added" style="background-color:#d4edda;padding:15px;border-radius:8px;text-align:center;cursor:pointer;">'
+                        f'<div style="font-size:2em;color:#155724;">{added_count}</div>'
+                        f'<div style="color:#155724;font-weight:bold;">新增条款</div></div>',
+                        unsafe_allow_html=True
+                    )
+                with col_s2:
+                    st.markdown(
+                        f'<div id="stat-removed" style="background-color:#f8d7da;padding:15px;border-radius:8px;text-align:center;cursor:pointer;">'
+                        f'<div style="font-size:2em;color:#721c24;">{removed_count}</div>'
+                        f'<div style="color:#721c24;font-weight:bold;">删除条款</div></div>',
+                        unsafe_allow_html=True
+                    )
+                with col_s3:
+                    st.markdown(
+                        f'<div id="stat-modified" style="background-color:#fff3cd;padding:15px;border-radius:8px;text-align:center;cursor:pointer;">'
+                        f'<div style="font-size:2em;color:#856404;">{modified_count}</div>'
+                        f'<div style="color:#856404;font-weight:bold;">修改条款</div></div>',
+                        unsafe_allow_html=True
+                    )
+                with col_s4:
+                    if risk_score_change is not None:
+                        change_str = f"+{risk_score_change}" if risk_score_change > 0 else str(risk_score_change)
+                        change_color = "#721c24" if risk_score_change < 0 else "#155724" if risk_score_change > 0 else "#856404"
+                        change_bg = "#f8d7da" if risk_score_change < 0 else "#d4edda" if risk_score_change > 0 else "#fff3cd"
+                        change_arrow = "↑" if risk_score_change > 0 else "↓" if risk_score_change < 0 else "→"
+                        st.markdown(
+                            f'<div style="background-color:{change_bg};padding:15px;border-radius:8px;text-align:center;cursor:pointer;">'
+                            f'<div style="font-size:2em;color:{change_color};">{change_str} {change_arrow}</div>'
+                            f'<div style="color:{change_color};font-weight:bold;">风险评分变化</div></div>',
+                            unsafe_allow_html=True
+                        )
+                    else:
+                        st.metric("风险评分变化", "N/A")
+
+                filter_type = st.selectbox(
+                    "筛选差异类型",
+                    ["全部", "新增", "删除", "修改"],
+                    key="cmp_filter"
+                )
+
+                st.markdown("---")
+                st.markdown('<p class="sub-header">📋 左右分栏对比</p>', unsafe_allow_html=True)
+
+                for diff in cmp_data.get("diffs", []):
+                    change_type = diff.get("changeType")
+
+                    if filter_type != "全部":
+                        type_map = {"新增": "ADDED", "删除": "REMOVED", "修改": "MODIFIED"}
+                        if change_type != type_map.get(filter_type):
+                            continue
+
+                    type_id_attr = {"ADDED": "diff-added", "REMOVED": "diff-removed", "MODIFIED": "diff-modified"}.get(change_type, "")
+                    icon = {"ADDED": "➕", "REMOVED": "➖", "MODIFIED": "✏️"}.get(change_type, "•")
+                    bg_color = {"ADDED": "#d4edda", "REMOVED": "#f8d7da", "MODIFIED": "#fff3cd"}.get(change_type, "#f8f9f9")
+
+                    risk_warning = ""
+                    if diff.get("introducesNewRisk"):
+                        risk_warning = " ⚠️引入新风险"
+
+                    with st.expander(
+                        f'{icon} [{change_type}] {diff.get("clauseNumber")} {diff.get("clauseTitle")}{risk_warning}',
+                        expanded=diff.get("introducesNewRisk", False)
+                    ):
+                        if diff.get("introducesNewRisk"):
+                            st.error(f"⚠️ 此变更引入了新风险！{diff.get('newRiskDescription', '')}")
+
+                        if change_type == "ADDED":
+                            st.markdown(
+                                f'<div style="background-color:#d4edda;padding:10px;border-radius:4px;border-left:4px solid #28a745;">'
+                                f'<b>新增内容:</b><br>{diff.get("newContent", "")}</div>',
+                                unsafe_allow_html=True
+                            )
+                        elif change_type == "REMOVED":
+                            st.markdown(
+                                f'<div style="background-color:#f8d7da;padding:10px;border-radius:4px;border-left:4px solid #dc3545;">'
+                                f'<b>删除内容:</b><br>{diff.get("oldContent", "")}</div>',
+                                unsafe_allow_html=True
+                            )
+                        else:
+                            col_left, col_right = st.columns(2)
+                            with col_left:
+                                st.markdown(
+                                    f'<div style="background-color:#fff3cd;padding:10px;border-radius:4px;border-left:4px solid #ffc107;">'
+                                    f'<b>原内容:</b><br>{diff.get("oldContent", "")}</div>',
+                                    unsafe_allow_html=True
+                                )
+                            with col_right:
+                                st.markdown(
+                                    f'<div style="background-color:#d4edda;padding:10px;border-radius:4px;border-left:4px solid #28a745;">'
+                                    f'<b>新内容:</b><br>{diff.get("newContent", "")}</div>',
+                                    unsafe_allow_html=True
+                                )
+                            if diff.get("similarity") is not None:
+                                st.caption(f"相似度: {diff.get('similarity', 0):.2%}")
+
+                        text_diffs = diff.get("textDiffs", [])
+                        if text_diffs:
+                            st.markdown("**逐行文字Diff:**")
+                            for seg in text_diffs:
+                                seg_type = seg.get("type")
+                                seg_text = seg.get("text")
+                                if seg_type == "added":
+                                    st.markdown(f'<div style="background-color:#d4edda;padding:2px 8px;border-left:3px solid #28a745;">+ {seg_text}</div>', unsafe_allow_html=True)
+                                elif seg_type == "removed":
+                                    st.markdown(f'<div style="background-color:#f8d7da;padding:2px 8px;border-left:3px solid #dc3545;">- {seg_text}</div>', unsafe_allow_html=True)
+                                else:
+                                    st.markdown(f'<div style="padding:2px 8px;color:#6c757d;">&nbsp; {seg_text}</div>', unsafe_allow_html=True)
+
+                st.markdown("---")
+                st.markdown('<p class="sub-header">📄 导出PDF报告</p>', unsafe_allow_html=True)
+                if st.button("📥 导出对比PDF报告", type="primary", key="export_cmp_pdf"):
+                    pdf_url = f"{API_BASE_URL}/versions/{cmp_contract_id}/comparison-export-pdf?fromVersion={cmp_from}&toVersion={cmp_to}"
+                    st.markdown(f'<a href="{pdf_url}" download="comparison_report.pdf" '
+                                f'style="display:inline-block;padding:10px 20px;background:#2e86c1;color:white;'
+                                f'border-radius:5px;text-decoration:none;font-weight:bold;">'
+                                f'📥 点击下载PDF对比报告</a>', unsafe_allow_html=True)
+                    st.info(f"如果点击无法下载，请直接访问: {pdf_url}")
 
     with tab_diff:
         contracts = api_call("GET", "/contracts")
@@ -1292,7 +1651,7 @@ def show_audit_log_page():
     with col2:
         operation_type_filter = st.selectbox(
             "操作类型",
-            ["", "UPLOAD_VERSION", "VIEW_VERSION", "ROLLBACK_VERSION", "EXPORT_REPORT", "VIEW_CHANGE_DIFF", "IMPACT_ASSESSMENT"],
+            ["", "UPLOAD_VERSION", "VIEW_VERSION", "ROLLBACK_VERSION", "EXPORT_REPORT", "VIEW_CHANGE_DIFF", "IMPACT_ASSESSMENT", "BATCH_DELETE_VERSION", "UPDATE_VERSION_NOTE", "ADD_VERSION_TAG", "REMOVE_VERSION_TAG", "EXPORT_COMPARISON_PDF"],
             key="audit_op_type"
         )
     with col3:
@@ -1335,7 +1694,12 @@ def show_audit_log_page():
                         "ROLLBACK_VERSION": "⏪ 回滚版本",
                         "EXPORT_REPORT": "📄 导出报告",
                         "VIEW_CHANGE_DIFF": "📊 查看变更",
-                        "IMPACT_ASSESSMENT": "🎯 影响评估"
+                        "IMPACT_ASSESSMENT": "🎯 影响评估",
+                        "BATCH_DELETE_VERSION": "🗑️ 批量删除版本",
+                        "UPDATE_VERSION_NOTE": "📝 修改备注",
+                        "ADD_VERSION_TAG": "🏷️ 设置标签",
+                        "REMOVE_VERSION_TAG": "🏷️ 移除标签",
+                        "EXPORT_COMPARISON_PDF": "📄 导出对比PDF"
                     }.get(log_entry.get("operationType", ""), log_entry.get("operationType", ""))
 
                     with st.expander(

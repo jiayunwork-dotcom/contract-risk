@@ -1,10 +1,12 @@
 package com.contractrisk.service;
 
+import com.contractrisk.dto.ClauseDiffResponse;
 import com.contractrisk.entity.Contract;
 import com.contractrisk.entity.ContractClause;
 import com.contractrisk.entity.RiskItem;
 import com.contractrisk.entity.RiskReport;
 import com.contractrisk.entity.enums.ContractType;
+import com.contractrisk.entity.enums.OperationType;
 import com.contractrisk.entity.enums.RiskLevel;
 import com.lowagie.text.*;
 import com.lowagie.text.Font;
@@ -32,6 +34,8 @@ public class PdfExportService {
     private final ComplianceService complianceService;
     private final RiskAnalysisService riskAnalysisService;
     private final ContractService contractService;
+    private final ChangeTrackingService changeTrackingService;
+    private final AuditLogService auditLogService;
 
     private static final DateTimeFormatter DTF = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
 
@@ -276,5 +280,150 @@ public class PdfExportService {
             case MEDIUM -> "中风险";
             case LOW -> "低风险";
         };
+    }
+
+    public byte[] exportComparisonPdf(Long contractId, Integer fromVersion, Integer toVersion) {
+        try {
+            ClauseDiffResponse diffResponse = changeTrackingService.getClauseDiff(contractId, fromVersion, toVersion);
+
+            ByteArrayOutputStream baos = new ByteArrayOutputStream();
+            Document document = new Document(PageSize.A4, 50, 50, 50, 50);
+            PdfWriter.getInstance(document, baos);
+
+            document.open();
+
+            Font titleFont = createChineseFont(18, Font.BOLD);
+            Font headerFont = createChineseFont(14, Font.BOLD);
+            Font normalFont = createChineseFont(10, Font.NORMAL);
+            Font boldFont = createChineseFont(10, Font.BOLD);
+            Font smallFont = createChineseFont(8, Font.NORMAL);
+
+            document.add(new Paragraph("版本对比报告", titleFont));
+            document.add(Chunk.NEWLINE);
+
+            document.add(new Paragraph("一、对比摘要", headerFont));
+            document.add(Chunk.NEWLINE);
+
+            PdfPTable summaryTable = new PdfPTable(2);
+            summaryTable.setWidthPercentage(100);
+            addTableRow(summaryTable, "源版本", diffResponse.getFromVersionLabel(), boldFont, normalFont);
+            addTableRow(summaryTable, "目标版本", diffResponse.getToVersionLabel(), boldFont, normalFont);
+            addTableRow(summaryTable, "新增条款数", String.valueOf(diffResponse.getAddedClausesCount()), boldFont, normalFont);
+            addTableRow(summaryTable, "删除条款数", String.valueOf(diffResponse.getRemovedClausesCount()), boldFont, normalFont);
+            addTableRow(summaryTable, "修改条款数", String.valueOf(diffResponse.getModifiedClausesCount()), boldFont, normalFont);
+            document.add(summaryTable);
+            document.add(Chunk.NEWLINE);
+
+            document.add(new Paragraph("二、逐条差异列表", headerFont));
+            document.add(Chunk.NEWLINE);
+
+            int idx = 1;
+            for (ClauseDiffResponse.ClauseDiffItem diff : diffResponse.getDiffs()) {
+                String changeType = diff.getChangeType();
+                String typeLabel = switch (changeType) {
+                    case "ADDED" -> "[新增]";
+                    case "REMOVED" -> "[删除]";
+                    case "MODIFIED" -> "[修改]";
+                    default -> "[其他]";
+                };
+
+                Color bgColor = switch (changeType) {
+                    case "ADDED" -> new Color(212, 237, 218);
+                    case "REMOVED" -> new Color(248, 215, 218);
+                    case "MODIFIED" -> new Color(255, 243, 205);
+                    default -> Color.WHITE;
+                };
+
+                PdfPCell typeCell = new PdfPCell(new Phrase(idx + ". " + typeLabel + " " + diff.getClauseNumber() + " " + diff.getClauseTitle(), boldFont));
+                typeCell.setBackgroundColor(bgColor);
+                typeCell.setPadding(6);
+                typeCell.setColspan(2);
+                PdfPTable diffTable = new PdfPTable(2);
+                diffTable.setWidthPercentage(100);
+                diffTable.addCell(typeCell);
+
+                if ("ADDED".equals(changeType)) {
+                    addTableRow(diffTable, "新增内容", truncate(diff.getNewContent(), 500), boldFont, normalFont);
+                } else if ("REMOVED".equals(changeType)) {
+                    addTableRow(diffTable, "删除内容", truncate(diff.getOldContent(), 500), boldFont, normalFont);
+                } else {
+                    addTableRow(diffTable, "原内容", truncate(diff.getOldContent(), 500), boldFont, normalFont);
+                    addTableRow(diffTable, "新内容", truncate(diff.getNewContent(), 500), boldFont, normalFont);
+                    if (diff.getSimilarity() != null) {
+                        addTableRow(diffTable, "相似度", String.format("%.2f%%", diff.getSimilarity() * 100), boldFont, normalFont);
+                    }
+                }
+
+                if (diff.getIntroducesNewRisk() != null && diff.getIntroducesNewRisk()) {
+                    PdfPCell riskCell = new PdfPCell(new Phrase("⚠️ 引入新风险: " + (diff.getNewRiskDescription() != null ? diff.getNewRiskDescription() : ""), normalFont));
+                    riskCell.setBackgroundColor(new Color(248, 215, 218));
+                    riskCell.setPadding(4);
+                    riskCell.setColspan(2);
+                    diffTable.addCell(riskCell);
+                }
+
+                if (diff.getTextDiffs() != null && !diff.getTextDiffs().isEmpty()) {
+                    StringBuilder textDiffStr = new StringBuilder();
+                    for (ClauseDiffResponse.TextDiffSegment seg : diff.getTextDiffs()) {
+                        String prefix = switch (seg.getType()) {
+                            case "added" -> "+ ";
+                            case "removed" -> "- ";
+                            default -> "  ";
+                        };
+                        textDiffStr.append(prefix).append(seg.getText() != null ? seg.getText() : "").append("\n");
+                    }
+                    addTableRow(diffTable, "文字Diff", textDiffStr.toString(), boldFont, normalFont);
+                }
+
+                document.add(diffTable);
+                document.add(Chunk.NEWLINE);
+                idx++;
+            }
+
+            document.add(new Paragraph("三、风险变化说明", headerFont));
+            document.add(Chunk.NEWLINE);
+
+            int addedRiskCount = 0;
+            int reducedRiskCount = 0;
+            for (ClauseDiffResponse.ClauseDiffItem diff : diffResponse.getDiffs()) {
+                if (diff.getIntroducesNewRisk() != null && diff.getIntroducesNewRisk()) {
+                    addedRiskCount++;
+                }
+                if ("MODIFIED".equals(diff.getChangeType())
+                        && diff.getOldRiskCount() != null && diff.getNewRiskCount() != null
+                        && diff.getNewRiskCount() < diff.getOldRiskCount()) {
+                    reducedRiskCount++;
+                }
+            }
+
+            document.add(new Paragraph("对比期间新增风险的条款: " + addedRiskCount + "条", normalFont));
+            document.add(new Paragraph("对比期间风险降低的条款: " + reducedRiskCount + "条", normalFont));
+            document.add(new Paragraph("新增条款: " + diffResponse.getAddedClausesCount() + "条", normalFont));
+            document.add(new Paragraph("删除条款: " + diffResponse.getRemovedClausesCount() + "条", normalFont));
+            document.add(new Paragraph("修改条款: " + diffResponse.getModifiedClausesCount() + "条", normalFont));
+            document.add(Chunk.NEWLINE);
+
+            Paragraph footer = new Paragraph();
+            footer.add(new Chunk("报告生成时间: " + LocalDateTime.now().format(DTF), smallFont));
+            footer.add(Chunk.NEWLINE);
+            footer.add(new Chunk("合同条款风险识别与合规审查系统 - 版本对比报告 - 机密文件", smallFont));
+            document.add(footer);
+
+            document.close();
+
+            auditLogService.logSuccess("system", OperationType.EXPORT_COMPARISON_PDF.name(),
+                    contractId, diffResponse.getToVersionId(),
+                    "导出版本对比PDF " + diffResponse.getFromVersionLabel() + " -> " + diffResponse.getToVersionLabel());
+
+            return baos.toByteArray();
+        } catch (Exception e) {
+            log.error("生成对比PDF报告失败", e);
+            throw new RuntimeException("生成对比PDF报告失败: " + e.getMessage(), e);
+        }
+    }
+
+    private String truncate(String text, int maxLen) {
+        if (text == null) return "";
+        return text.length() > maxLen ? text.substring(0, maxLen) + "..." : text;
     }
 }

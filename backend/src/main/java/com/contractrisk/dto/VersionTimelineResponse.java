@@ -29,6 +29,7 @@ public class VersionTimelineResponse {
         private String versionNote;
         private boolean isCurrent;
         private ChangeSummaryInfo changeSummary;
+        private List<VersionTagDTO> tags;
     }
 
     @Data

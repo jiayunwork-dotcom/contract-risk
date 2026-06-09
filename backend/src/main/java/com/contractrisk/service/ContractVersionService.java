@@ -1,15 +1,10 @@
 package com.contractrisk.service;
 
+import com.contractrisk.dto.VersionTagDTO;
 import com.contractrisk.dto.VersionTimelineResponse;
-import com.contractrisk.entity.Contract;
-import com.contractrisk.entity.ContractClause;
-import com.contractrisk.entity.ContractVersion;
-import com.contractrisk.entity.VersionChangeSummary;
+import com.contractrisk.entity.*;
 import com.contractrisk.entity.enums.OperationType;
-import com.contractrisk.repository.ContractClauseRepository;
-import com.contractrisk.repository.ContractRepository;
-import com.contractrisk.repository.ContractVersionRepository;
-import com.contractrisk.repository.VersionChangeSummaryRepository;
+import com.contractrisk.repository.*;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -21,6 +16,7 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
+import java.util.stream.Collectors;
 
 @Slf4j
 @Service
@@ -31,7 +27,10 @@ public class ContractVersionService {
     private final ContractRepository contractRepository;
     private final ContractClauseRepository clauseRepository;
     private final VersionChangeSummaryRepository changeSummaryRepository;
-    private final ContractService contractService;
+    private final VersionTagRepository tagRepository;
+    private final VersionTagRelationRepository tagRelationRepository;
+    private final RiskItemRepository riskItemRepository;
+    private final RiskReportRepository riskReportRepository;
     private final DocumentParserService documentParserService;
     private final ContractStructureService structureService;
     private final ChangeTrackingService changeTrackingService;
@@ -144,6 +143,9 @@ public class ContractVersionService {
                         info.setRiskScoreChange(s.getRiskScoreChange());
                         node.setChangeSummary(info);
                     });
+
+            List<VersionTagDTO> tagDTOs = getVersionTags(v.getId());
+            node.setTags(tagDTOs);
 
             nodes.add(node);
         }
@@ -272,5 +274,160 @@ public class ContractVersionService {
         contract.setCurrentVersionId(versionId);
         contract.setFullText(targetVersion.getFullText());
         contractRepository.save(contract);
+    }
+
+    @Transactional
+    public void batchDeleteVersions(Long contractId, List<Long> versionIds, String operatedBy) {
+        Contract contract = contractRepository.findByIdAndDeletedFalse(contractId)
+                .orElseThrow(() -> new IllegalArgumentException("合同不存在: " + contractId));
+
+        Long currentVersionId = contract.getCurrentVersionId();
+        for (Long vid : versionIds) {
+            if (currentVersionId != null && currentVersionId.equals(vid)) {
+                throw new IllegalArgumentException("当前版本(ID:" + vid + ")不允许删除");
+            }
+        }
+
+        List<ContractVersion> versionsToDelete = versionRepository.findAllById(versionIds);
+        for (ContractVersion v : versionsToDelete) {
+            if (!v.getContract().getId().equals(contractId)) {
+                throw new IllegalArgumentException("版本(ID:" + v.getId() + ")不属于该合同");
+            }
+        }
+
+        tagRelationRepository.deleteByVersionIds(versionIds);
+
+        for (Long vid : versionIds) {
+            List<ContractClause> clauses = clauseRepository.findByVersionId(vid);
+            List<Long> clauseIds = clauses.stream().map(ContractClause::getId).collect(Collectors.toList());
+            for (Long clauseId : clauseIds) {
+                riskItemRepository.deleteByClauseId(clauseId);
+            }
+            clauseRepository.deleteAll(clauses);
+
+            riskReportRepository.findByVersionId(vid)
+                    .ifPresent(riskReportRepository::delete);
+        }
+
+        changeSummaryRepository.findByContractIdOrderByVersionAsc(contractId).stream()
+                .filter(s -> versionIds.contains(s.getFromVersion() != null ? s.getFromVersion().getId() : -1L)
+                        || versionIds.contains(s.getToVersion() != null ? s.getToVersion().getId() : -1L))
+                .forEach(changeSummaryRepository::delete);
+
+        versionRepository.deleteAllById(versionIds);
+
+        auditLogService.logSuccess(operatedBy, OperationType.BATCH_DELETE_VERSION.name(),
+                contractId, null,
+                "批量删除版本IDs: " + versionIds);
+
+        log.info("批量删除版本成功，合同ID: {}, 删除版本IDs: {}", contractId, versionIds);
+    }
+
+    @Transactional
+    public ContractVersion updateVersionNote(Long versionId, String versionNote, String operatedBy) {
+        ContractVersion version = versionRepository.findById(versionId)
+                .orElseThrow(() -> new IllegalArgumentException("版本不存在: " + versionId));
+
+        String oldNote = version.getVersionNote();
+        version.setVersionNote(versionNote);
+        version = versionRepository.save(version);
+
+        auditLogService.logSuccess(operatedBy, OperationType.UPDATE_VERSION_NOTE.name(),
+                version.getContract().getId(), versionId,
+                "修改版本备注 " + version.getVersionLabel() + "，原备注: " + (oldNote != null ? oldNote.substring(0, Math.min(oldNote.length(), 100)) : "空"));
+
+        return version;
+    }
+
+    public List<VersionTagDTO> getAllTags() {
+        List<VersionTag> tags = tagRepository.findByDeletedFalse();
+        return tags.stream()
+                .map(t -> new VersionTagDTO(t.getId(), t.getName(), t.getColor(), t.isPredefined()))
+                .collect(Collectors.toList());
+    }
+
+    @Transactional
+    public VersionTagDTO createTag(String name, String color) {
+        if (tagRepository.existsByNameAndDeletedFalse(name)) {
+            throw new IllegalArgumentException("标签名称已存在: " + name);
+        }
+        VersionTag tag = new VersionTag();
+        tag.setName(name);
+        tag.setColor(color != null ? color : "#3498db");
+        tag.setPredefined(false);
+        tag = tagRepository.save(tag);
+        return new VersionTagDTO(tag.getId(), tag.getName(), tag.getColor(), tag.isPredefined());
+    }
+
+    @Transactional
+    public void deleteTag(Long tagId) {
+        VersionTag tag = tagRepository.findById(tagId)
+                .orElseThrow(() -> new IllegalArgumentException("标签不存在: " + tagId));
+        if (tag.isPredefined()) {
+            throw new IllegalArgumentException("预定义标签不可删除");
+        }
+        tag.setDeleted(true);
+        tagRepository.save(tag);
+    }
+
+    @Transactional
+    public List<VersionTagDTO> setVersionTags(Long versionId, List<Long> tagIds) {
+        ContractVersion version = versionRepository.findById(versionId)
+                .orElseThrow(() -> new IllegalArgumentException("版本不存在: " + versionId));
+
+        tagRelationRepository.deleteByVersionId(versionId);
+
+        List<VersionTagDTO> result = new ArrayList<>();
+        if (tagIds != null) {
+            for (Long tagId : tagIds) {
+                VersionTag tag = tagRepository.findById(tagId)
+                        .filter(t -> !t.isDeleted())
+                        .orElseThrow(() -> new IllegalArgumentException("标签不存在或已删除: " + tagId));
+
+                VersionTagRelation relation = new VersionTagRelation();
+                relation.setVersion(version);
+                relation.setTag(tag);
+                tagRelationRepository.save(relation);
+
+                result.add(new VersionTagDTO(tag.getId(), tag.getName(), tag.getColor(), tag.isPredefined()));
+            }
+        }
+
+        auditLogService.logSuccess("system", OperationType.ADD_VERSION_TAG.name(),
+                version.getContract().getId(), versionId,
+                "设置版本 " + version.getVersionLabel() + " 标签: " + tagIds);
+
+        return result;
+    }
+
+    public List<VersionTagDTO> getVersionTags(Long versionId) {
+        List<VersionTagRelation> relations = tagRelationRepository.findActiveByVersionId(versionId);
+        return relations.stream()
+                .map(r -> {
+                    VersionTag tag = r.getTag();
+                    return new VersionTagDTO(tag.getId(), tag.getName(), tag.getColor(), tag.isPredefined());
+                })
+                .collect(Collectors.toList());
+    }
+
+    @Transactional
+    public void initPredefinedTags() {
+        if (!tagRepository.findByPredefinedTrueAndDeletedFalse().isEmpty()) {
+            return;
+        }
+        String[][] predefinedTags = {
+                {"已审核", "#27ae60"},
+                {"待修订", "#f39c12"},
+                {"最终版", "#2e86c1"},
+                {"草稿", "#95a5a6"},
+                {"已签署", "#1abc9c"}
+        };
+        for (String[] pt : predefinedTags) {
+            VersionTag tag = new VersionTag();
+            tag.setName(pt[0]);
+            tag.setColor(pt[1]);
+            tag.setPredefined(true);
+            tagRepository.save(tag);
+        }
     }
 }
