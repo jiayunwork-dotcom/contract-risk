@@ -52,7 +52,7 @@ public class ContractVersionService {
         Path filePath = documentParserService.saveUploadedFile(file);
         String text = documentParserService.parseDocument(file);
 
-        List<ContractVersion> currentVersions = versionRepository.findByContractIdAndIsCurrentTrue(contractId);
+        List<ContractVersion> currentVersions = versionRepository.findByContractIdAndCurrentTrue(contractId);
         for (ContractVersion cv : currentVersions) {
             cv.setCurrent(false);
             versionRepository.save(cv);
@@ -161,7 +161,7 @@ public class ContractVersionService {
     }
 
     public Optional<ContractVersion> getCurrentVersion(Long contractId) {
-        List<ContractVersion> currentVersions = versionRepository.findByContractIdAndIsCurrentTrue(contractId);
+        List<ContractVersion> currentVersions = versionRepository.findByContractIdAndCurrentTrue(contractId);
         return currentVersions.stream().findFirst();
     }
 
@@ -181,7 +181,7 @@ public class ContractVersionService {
         Integer maxVersion = versionRepository.findMaxVersionNumber(contractId);
         int newVersionNumber = (maxVersion == null ? 0 : maxVersion) + 1;
 
-        List<ContractVersion> currentVersions = versionRepository.findByContractIdAndIsCurrentTrue(contractId);
+        List<ContractVersion> currentVersions = versionRepository.findByContractIdAndCurrentTrue(contractId);
         for (ContractVersion cv : currentVersions) {
             cv.setCurrent(false);
             versionRepository.save(cv);
@@ -260,7 +260,7 @@ public class ContractVersionService {
             throw new IllegalArgumentException("版本不属于该合同");
         }
 
-        List<ContractVersion> currentVersions = versionRepository.findByContractIdAndIsCurrentTrue(contractId);
+        List<ContractVersion> currentVersions = versionRepository.findByContractIdAndCurrentTrue(contractId);
         for (ContractVersion cv : currentVersions) {
             cv.setCurrent(false);
             versionRepository.save(cv);

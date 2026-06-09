@@ -16,7 +16,7 @@ public interface ContractVersionRepository extends JpaRepository<ContractVersion
 
     List<ContractVersion> findByContractIdOrderByVersionNumberAsc(Long contractId);
 
-    List<ContractVersion> findByContractIdAndIsCurrentTrue(Long contractId);
+    List<ContractVersion> findByContractIdAndCurrentTrue(Long contractId);
 
     @Query("SELECT MAX(v.versionNumber) FROM ContractVersion v WHERE v.contract.id = :contractId")
     Integer findMaxVersionNumber(@Param("contractId") Long contractId);
@@ -25,6 +25,6 @@ public interface ContractVersionRepository extends JpaRepository<ContractVersion
 
     Optional<ContractVersion> findByContractIdAndVersionNumber(Long contractId, Integer versionNumber);
 
-    @Query("SELECT v FROM ContractVersion v WHERE v.contract.id = :contractId AND v.versionNumber < :versionNumber ORDER BY v.versionNumber DESC LIMIT 1")
-    Optional<ContractVersion> findPreviousVersion(@Param("contractId") Long contractId, @Param("versionNumber") Integer versionNumber);
+    Optional<ContractVersion> findFirstByContractIdAndVersionNumberLessThanOrderByVersionNumberDesc(
+            @Param("contractId") Long contractId, @Param("versionNumber") Integer versionNumber);
 }

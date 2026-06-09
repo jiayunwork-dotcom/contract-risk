@@ -243,7 +243,7 @@ public class ComplianceService implements CommandLineRunner {
     }
 
     private void updateRiskReportWithCompliance(Long contractId, Map<String, Object> complianceResult) {
-        Optional<RiskReport> reportOpt = riskReportRepository.findByContractId(contractId);
+        Optional<RiskReport> reportOpt = riskReportRepository.findTopByContractIdOrderByIdDesc(contractId);
         if (reportOpt.isPresent()) {
             RiskReport report = reportOpt.get();
             report.setComplianceStatus((String) complianceResult.get("complianceStatus"));

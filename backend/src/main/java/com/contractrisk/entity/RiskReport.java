@@ -17,8 +17,8 @@ public class RiskReport {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
-    @OneToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "contract_id", nullable = false, unique = true)
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "contract_id", nullable = false)
     private Contract contract;
 
     @ManyToOne(fetch = FetchType.LAZY)

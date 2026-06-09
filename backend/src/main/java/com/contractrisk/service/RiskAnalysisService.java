@@ -44,6 +44,15 @@ public class RiskAnalysisService {
         Contract contract = contractService.getContractById(contractId)
                 .orElseThrow(() -> new IllegalArgumentException("合同不存在: " + contractId));
 
+        List<ContractVersion> currentVersions = versionRepository.findByContractIdAndCurrentTrue(contractId);
+        if (!currentVersions.isEmpty()) {
+            Long versionId = currentVersions.get(0).getId();
+            return analyzeByVersion(contractId, versionId);
+        }
+
+        List<ContractClause> clauses = clauseRepository.findByContractIdOrderBySortOrderAsc(contractId);
+        contract.setClauses(clauses);
+
         if (riskReportRepository.existsByContractId(contractId)) {
             riskReportRepository.deleteByContractId(contractId);
         }
@@ -199,7 +208,7 @@ public class RiskAnalysisService {
     }
 
     public Optional<RiskReport> getReportByContractId(Long contractId) {
-        return riskReportRepository.findByContractId(contractId);
+        return riskReportRepository.findTopByContractIdOrderByIdDesc(contractId);
     }
 
     public Optional<RiskReport> getReportByVersionId(Long versionId) {

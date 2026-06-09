@@ -3,6 +3,7 @@ package com.contractrisk.service;
 import com.contractrisk.dto.AuditLogResponse;
 import com.contractrisk.entity.AuditLog;
 import com.contractrisk.repository.AuditLogRepository;
+import com.contractrisk.repository.AuditLogSpecification;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.domain.Page;
@@ -13,7 +14,6 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
-import java.util.List;
 import java.util.stream.Collectors;
 
 @Slf4j
@@ -53,8 +53,9 @@ public class AuditLogService {
                                                    LocalDateTime startTime, LocalDateTime endTime,
                                                    Long contractId, int page, int size) {
         Pageable pageable = PageRequest.of(page, size, Sort.by(Sort.Direction.DESC, "operationTime"));
-        Page<AuditLog> logPage = auditLogRepository.findByFilters(
-                operator, operationType, startTime, endTime, contractId, pageable);
+        Page<AuditLog> logPage = auditLogRepository.findAll(
+                AuditLogSpecification.withFilters(operator, operationType, startTime, endTime, contractId),
+                pageable);
         return logPage.map(this::toResponse);
     }
 
