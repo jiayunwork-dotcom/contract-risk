@@ -1,0 +1,76 @@
+version: '3.9'
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: contract-risk-postgres
+    environment:
+      POSTGRES_DB: contract_risk
+      POSTGRES_USER: contract_user
+      POSTGRES_PASSWORD: contract_password
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U contract_user -d contract_risk"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - contract-network
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: contract-risk-backend
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/contract_risk
+      SPRING_DATASOURCE_USERNAME: contract_user
+      SPRING_DATASOURCE_PASSWORD: contract_password
+      SPRING_JPA_HIBERNATE_DDL_AUTO: update
+      CONTRACT_UPLOAD_PATH: /app/uploads
+      CONTRACT_OCR_ENABLED: "true"
+      CONTRACT_OCR_LANGUAGE: chi_sim+eng
+      CONTRACT_RISK_HIGH_PENALTY: 20
+      CONTRACT_RISK_MEDIUM_PENALTY: 10
+      CONTRACT_RISK_LOW_PENALTY: 5
+      CONTRACT_COMPLIANCE_MISSING_PENALTY: 30
+      CONTRACT_COMPLIANCE_FORBIDDEN_PENALTY: 50
+      CONTRACT_APPROVAL_ESCALATION_HOURS: 48
+    ports:
+      - "8080:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - backend_uploads:/app/uploads
+      - backend_logs:/app/logs
+    networks:
+      - contract-network
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: contract-risk-frontend
+    environment:
+      API_BASE_URL: http://backend:8080/api
+    ports:
+      - "8501:8501"
+    depends_on:
+      - backend
+    networks:
+      - contract-network
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+  backend_uploads:
+  backend_logs:
+
+networks:
+  contract-network:
+    driver: bridge

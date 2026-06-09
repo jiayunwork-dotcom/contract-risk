@@ -1,0 +1,72 @@
+package com.contractrisk.controller;
+
+import com.contractrisk.dto.ApiResponse;
+import com.contractrisk.entity.ComplianceTemplate;
+import com.contractrisk.entity.enums.ContractType;
+import com.contractrisk.service.ComplianceService;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.web.bind.annotation.*;
+
+import java.util.List;
+import java.util.Map;
+import java.util.Optional;
+
+@Slf4j
+@RestController
+@RequestMapping("/compliance")
+@RequiredArgsConstructor
+@CrossOrigin(origins = "*", maxAge = 3600)
+public class ComplianceController {
+
+    private final ComplianceService complianceService;
+
+    @PostMapping("/check/{contractId}")
+    public ApiResponse<Map<String, Object>> checkCompliance(@PathVariable Long contractId) {
+        try {
+            Map<String, Object> result = complianceService.checkCompliance(contractId);
+            return ApiResponse.success("合规检查完成", result);
+        } catch (IllegalArgumentException e) {
+            return ApiResponse.error(e.getMessage());
+        } catch (Exception e) {
+            log.error("合规检查失败", e);
+            return ApiResponse.error("合规检查失败: " + e.getMessage());
+        }
+    }
+
+    @GetMapping("/templates")
+    public ApiResponse<List<ComplianceTemplate>> getTemplates() {
+        List<ComplianceTemplate> templates = complianceService.getAllTemplates();
+        return ApiResponse.success(templates);
+    }
+
+    @GetMapping("/templates/type/{type}")
+    public ApiResponse<List<ComplianceTemplate>> getTemplatesByType(@PathVariable ContractType type) {
+        List<ComplianceTemplate> templates = complianceService.getTemplatesByType(type);
+        return ApiResponse.success(templates);
+    }
+
+    @GetMapping("/templates/{id}")
+    public ApiResponse<ComplianceTemplate> getTemplateById(@PathVariable Long id) {
+        Optional<ComplianceTemplate> template = complianceService.getTemplateById(id);
+        return template
+                .map(t -> ApiResponse.success(t))
+                .orElseGet(() -> ApiResponse.error("模板不存在"));
+    }
+
+    @PostMapping("/templates")
+    public ApiResponse<ComplianceTemplate> createTemplate(@RequestBody ComplianceTemplate template) {
+        ComplianceTemplate saved = complianceService.createTemplate(template);
+        return ApiResponse.success("模板创建成功", saved);
+    }
+
+    @DeleteMapping("/templates/{id}")
+    public ApiResponse<Void> deleteTemplate(@PathVariable Long id) {
+        boolean deleted = complianceService.deleteTemplate(id);
+        if (deleted) {
+            return ApiResponse.success("模板已删除", null);
+        } else {
+            return ApiResponse.error("模板不存在");
+        }
+    }
+}

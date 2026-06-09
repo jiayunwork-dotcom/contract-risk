@@ -1,0 +1,59 @@
+server:
+  port: 8080
+  servlet:
+    context-path: /api
+
+spring:
+  application:
+    name: contract-risk-backend
+  datasource:
+    url: ${SPRING_DATASOURCE_URL:jdbc:postgresql://${SPRING_DATASOURCE_HOST:postgres}:5432/${SPRING_DATASOURCE_DB:contract_risk}}
+    username: ${SPRING_DATASOURCE_USERNAME:contract_user}
+    password: ${SPRING_DATASOURCE_PASSWORD:contract_password}
+    driver-class-name: org.postgresql.Driver
+    hikari:
+      maximum-pool-size: 20
+      minimum-idle: 5
+      idle-timeout: 300000
+      connection-timeout: 20000
+  jpa:
+    hibernate:
+      ddl-auto: update
+    show-sql: false
+    properties:
+      hibernate:
+        dialect: org.hibernate.dialect.PostgreSQLDialect
+        format_sql: true
+  servlet:
+    multipart:
+      max-file-size: 50MB
+      max-request-size: 100MB
+
+contract:
+  upload:
+    path: ${CONTRACT_UPLOAD_PATH:/tmp/contracts}
+  ocr:
+    enabled: ${CONTRACT_OCR_ENABLED:true}
+    data-path: ${CONTRACT_OCR_DATA_PATH:/usr/share/tessdata}
+    language: ${CONTRACT_OCR_LANGUAGE:chi_sim+eng}
+  risk:
+    high-penalty: ${CONTRACT_RISK_HIGH_PENALTY:20}
+    medium-penalty: ${CONTRACT_RISK_MEDIUM_PENALTY:10}
+    low-penalty: ${CONTRACT_RISK_LOW_PENALTY:5}
+    missing-required-penalty: ${CONTRACT_COMPLIANCE_MISSING_PENALTY:30}
+    forbidden-clause-penalty: ${CONTRACT_COMPLIANCE_FORBIDDEN_PENALTY:50}
+    reject-threshold: 60
+  approval:
+    auto-escalate-hours: ${CONTRACT_APPROVAL_ESCALATION_HOURS:48}
+
+logging:
+  level:
+    com.contractrisk: DEBUG
+    org.springframework.web: INFO
+    org.hibernate.SQL: WARN
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics
