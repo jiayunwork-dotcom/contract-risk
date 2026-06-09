@@ -11,6 +11,7 @@ import org.springframework.boot.CommandLineRunner;
 import org.springframework.core.annotation.Order;
 import org.springframework.stereotype.Component;
 
+import java.math.BigDecimal;
 import java.util.Arrays;
 import java.util.List;
 
@@ -66,9 +67,9 @@ public class ComplianceTemplateInitializer implements CommandLineRunner {
         template.setDescription("适用于货物采购类合同的合规审查标准");
         template.setRequiredClauses(objectMapper.writeValueAsString(requiredClauses));
         template.setForbiddenClauses(objectMapper.writeValueAsString(forbiddenClauses));
-        template.setMinAmount(1000.0);
-        template.setMaxAmount(10000000.0);
-        template.setEnabled(true);
+        template.setMinAmount(BigDecimal.valueOf(1000.0));
+        template.setMaxAmount(BigDecimal.valueOf(10000000.0));
+        template.setActive(true);
 
         templateRepository.save(template);
     }
@@ -97,9 +98,9 @@ public class ComplianceTemplateInitializer implements CommandLineRunner {
         template.setDescription("适用于房屋、设备租赁类合同的合规审查标准");
         template.setRequiredClauses(objectMapper.writeValueAsString(requiredClauses));
         template.setForbiddenClauses(objectMapper.writeValueAsString(forbiddenClauses));
-        template.setMinAmount(500.0);
-        template.setMaxAmount(5000000.0);
-        template.setEnabled(true);
+        template.setMinAmount(BigDecimal.valueOf(500.0));
+        template.setMaxAmount(BigDecimal.valueOf(5000000.0));
+        template.setActive(true);
 
         templateRepository.save(template);
     }
@@ -131,9 +132,9 @@ public class ComplianceTemplateInitializer implements CommandLineRunner {
         template.setDescription("适用于劳动合同的合规审查标准，符合《劳动合同法》要求");
         template.setRequiredClauses(objectMapper.writeValueAsString(requiredClauses));
         template.setForbiddenClauses(objectMapper.writeValueAsString(forbiddenClauses));
-        template.setMinAmount(0.0);
+        template.setMinAmount(BigDecimal.valueOf(0.0));
         template.setMaxAmount(null);
-        template.setEnabled(true);
+        template.setActive(true);
 
         templateRepository.save(template);
     }
@@ -164,9 +165,9 @@ public class ComplianceTemplateInitializer implements CommandLineRunner {
         template.setDescription("适用于产品销售类合同的合规审查标准");
         template.setRequiredClauses(objectMapper.writeValueAsString(requiredClauses));
         template.setForbiddenClauses(objectMapper.writeValueAsString(forbiddenClauses));
-        template.setMinAmount(1000.0);
-        template.setMaxAmount(50000000.0);
-        template.setEnabled(true);
+        template.setMinAmount(BigDecimal.valueOf(1000.0));
+        template.setMaxAmount(BigDecimal.valueOf(50000000.0));
+        template.setActive(true);
 
         templateRepository.save(template);
     }
@@ -198,9 +199,9 @@ public class ComplianceTemplateInitializer implements CommandLineRunner {
         template.setDescription("适用于各类服务类合同的合规审查标准");
         template.setRequiredClauses(objectMapper.writeValueAsString(requiredClauses));
         template.setForbiddenClauses(objectMapper.writeValueAsString(forbiddenClauses));
-        template.setMinAmount(1000.0);
-        template.setMaxAmount(20000000.0);
-        template.setEnabled(true);
+        template.setMinAmount(BigDecimal.valueOf(1000.0));
+        template.setMaxAmount(BigDecimal.valueOf(20000000.0));
+        template.setActive(true);
 
         templateRepository.save(template);
     }
