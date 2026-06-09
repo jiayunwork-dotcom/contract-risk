@@ -126,7 +126,8 @@ public class ContractController {
                 contract.getExpirationDate(),
                 contract.getSigningDate(),
                 contract.getClauses() != null ? contract.getClauses().size() : 0,
-                contract.getCreatedAt()
+                contract.getCreatedAt(),
+                contract.getCurrentVersionId()
         );
     }
 }

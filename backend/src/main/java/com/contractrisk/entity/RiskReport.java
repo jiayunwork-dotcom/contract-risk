@@ -21,6 +21,10 @@ public class RiskReport {
     @JoinColumn(name = "contract_id", nullable = false, unique = true)
     private Contract contract;
 
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "version_id")
+    private ContractVersion version;
+
     @Column(name = "risk_score", precision = 5, scale = 2)
     private BigDecimal riskScore;
 

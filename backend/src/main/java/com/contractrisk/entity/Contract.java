@@ -83,6 +83,12 @@ public class Contract {
     @Column(name = "updated_at")
     private LocalDateTime updatedAt;
 
+    @OneToMany(mappedBy = "contract", cascade = CascadeType.ALL, orphanRemoval = true)
+    private List<ContractVersion> versions = new ArrayList<>();
+
+    @Column(name = "current_version_id")
+    private Long currentVersionId;
+
     @Column(name = "is_deleted", nullable = false)
     private boolean deleted = false;
 }

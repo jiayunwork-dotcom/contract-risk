@@ -2,9 +2,11 @@ package com.contractrisk.service;
 
 import com.contractrisk.entity.Contract;
 import com.contractrisk.entity.ContractClause;
+import com.contractrisk.entity.ContractVersion;
 import com.contractrisk.entity.enums.ContractType;
 import com.contractrisk.repository.ContractClauseRepository;
 import com.contractrisk.repository.ContractRepository;
+import com.contractrisk.repository.ContractVersionRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -23,6 +25,7 @@ public class ContractService {
 
     private final ContractRepository contractRepository;
     private final ContractClauseRepository clauseRepository;
+    private final ContractVersionRepository versionRepository;
     private final DocumentParserService documentParserService;
     private final ContractStructureService structureService;
 
@@ -45,14 +48,30 @@ public class ContractService {
 
         contract = contractRepository.save(contract);
 
+        ContractVersion version = new ContractVersion();
+        version.setContract(contract);
+        version.setVersionNumber(1);
+        version.setVersionLabel("v1");
+        version.setUploadedBy(createdBy);
+        version.setVersionNote("初始版本");
+        version.setFullText(text);
+        version.setOriginalFileName(originalFileName);
+        version.setFileType(fileType);
+        version.setFilePath(filePath.toString());
+        version.setCurrent(true);
+        version = versionRepository.save(version);
+
         List<ContractClause> clauses = structureService.parseStructure(text, contract);
         for (ContractClause clause : clauses) {
             clause.setContract(contract);
+            clause.setVersion(version);
         }
         clauseRepository.saveAll(clauses);
         contract.setClauses(clauses);
+        contract.setCurrentVersionId(version.getId());
+        contract = contractRepository.save(contract);
 
-        log.info("合同上传成功，ID: {}, 文件名: {}, 条款数: {}",
+        log.info("合同上传成功，ID: {}, 文件名: {}, 条款数: {}, 版本: v1",
                 contract.getId(), originalFileName, clauses.size());
 
         return contract;

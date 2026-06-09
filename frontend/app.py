@@ -144,7 +144,7 @@ def main():
 
     page = st.sidebar.radio(
         "功能导航",
-        ["🏠 首页", "📤 合同上传", "🔍 风险分析", "✅ 合规检查", "⚖️ 合同对比", "📝 审批管理", "⚙️ 规则管理"]
+        ["🏠 首页", "📤 合同上传", "🔍 风险分析", "✅ 合规检查", "⚖️ 合同对比", "🔄 版本管理", "📜 审计日志", "📝 审批管理", "⚙️ 规则管理"]
     )
 
     st.sidebar.markdown("---")
@@ -160,6 +160,10 @@ def main():
         show_compliance_page()
     elif page == "⚖️ 合同对比":
         show_comparison_page()
+    elif page == "🔄 版本管理":
+        show_version_management_page()
+    elif page == "📜 审计日志":
+        show_audit_log_page()
     elif page == "📝 审批管理":
         show_approval_page()
     elif page == "⚙️ 规则管理":
@@ -975,3 +979,394 @@ def show_rules_page():
 
 if __name__ == "__main__":
     main()
+
+
+def show_version_management_page():
+    st.markdown('<p class="main-header">🔄 合同版本管理与变更追踪</p>', unsafe_allow_html=True)
+
+    tab_versions, tab_upload, tab_diff, tab_impact = st.tabs([
+        "📋 版本时间线", "📤 上传新版本", "📊 变更详情", "🎯 影响评估"
+    ])
+
+    with tab_versions:
+        contracts = api_call("GET", "/contracts")
+        if contracts and contracts.get("success"):
+            contract_list = contracts.get("data", [])
+            if not contract_list:
+                st.info("暂无合同，请先上传合同")
+            else:
+                contract_options = {f"ID:{c.get('id')} - {c.get('title', '无标题')[:40]}": c.get("id") for c in contract_list}
+                selected_label = st.selectbox("选择合同", list(contract_options.keys()), key="vm_contract")
+                contract_id = contract_options[selected_label]
+
+                timeline = api_call("GET", f"/versions/{contract_id}/timeline")
+                if timeline and timeline.get("success"):
+                    data = timeline.get("data", {})
+                    versions = data.get("versions", [])
+
+                    if not versions:
+                        st.info("暂无版本信息")
+                    else:
+                        st.markdown(f"**合同:** {data.get('contractTitle')} | **当前版本:** v{data.get('currentVersionNumber')}")
+
+                        st.markdown("---")
+                        st.markdown('<p class="sub-header">📅 版本时间线</p>', unsafe_allow_html=True)
+
+                        for v in versions:
+                            is_current = v.get("isCurrent", False)
+                            current_badge = " 🔵 **[当前版本]**" if is_current else ""
+
+                            col1, col2, col3 = st.columns([2, 2, 1])
+                            with col1:
+                                st.markdown(
+                                    f'<div class="card">{"🎯 " if is_current else "📄 "}'
+                                    f'**{v.get("versionLabel")}**{current_badge}<br>'
+                                    f'上传人: {v.get("uploadedBy", "N/A")} | '
+                                    f'时间: {v.get("uploadTime", "")[:19] if v.get("uploadTime") else ""}<br>'
+                                    f'备注: {v.get("versionNote", "")}</div>',
+                                    unsafe_allow_html=True
+                                )
+                            with col2:
+                                cs = v.get("changeSummary")
+                                if cs:
+                                    score_change = cs.get("riskScoreChange")
+                                    score_str = f"+{score_change}" if score_change and score_change > 0 else str(score_change) if score_change is not None else "N/A"
+                                    st.markdown(
+                                        f'变更摘要: ➕{cs.get("addedClausesCount", 0)} '
+                                        f'➖{cs.get("removedClausesCount", 0)} '
+                                        f'✏️{cs.get("modifiedClausesCount", 0)} | '
+                                        f'风险变化: {score_str}'
+                                    )
+                                else:
+                                    if v.get("versionNumber") == 1:
+                                        st.caption("初始版本，无变更记录")
+                                    else:
+                                        st.caption("暂无变更摘要")
+                            with col3:
+                                if st.button(f"📄 查看", key=f"view_v_{v.get('versionId')}"):
+                                    st.session_state["selected_version_id"] = v.get("versionId")
+                                    st.session_state["selected_version_contract"] = contract_id
+
+                                if not is_current:
+                                    if st.button(f"⏪ 回滚", key=f"rb_v_{v.get('versionId')}"):
+                                        result = api_call("POST",
+                                            f"/versions/{contract_id}/rollback/{v.get('versionNumber')}",
+                                            params={"operatedBy": "demo_user"})
+                                        if result and result.get("success"):
+                                            st.success(f"✅ 回滚成功！新版本: {result.get('data', {}).get('versionLabel')}")
+                                            st.rerun()
+                                        else:
+                                            st.error(f"回滚失败: {result.get('message', '未知错误') if result else '未知错误'}")
+
+                        if "selected_version_id" in st.session_state and st.session_state.get("selected_version_contract") == contract_id:
+                            vid = st.session_state["selected_version_id"]
+                            st.markdown("---")
+                            st.markdown('<p class="sub-header">📋 版本条款</p>', unsafe_allow_html=True)
+                            clauses = api_call("GET", f"/versions/{vid}/clauses")
+                            if clauses and clauses.get("success"):
+                                for c in clauses.get("data", []):
+                                    risk_badge = " 🔴" if c.get("highRisk") else ""
+                                    with st.expander(f"{c.get('clauseNumber', '')} {c.get('title', '')}{risk_badge}"):
+                                        st.write(c.get("content", ""))
+
+    with tab_upload:
+        contracts = api_call("GET", "/contracts")
+        if contracts and contracts.get("success"):
+            contract_list = contracts.get("data", [])
+            if not contract_list:
+                st.info("暂无合同，请先上传合同")
+            else:
+                contract_options = {f"ID:{c.get('id')} - {c.get('title', '无标题')[:40]}": c.get("id") for c in contract_list}
+                selected_label = st.selectbox("选择合同", list(contract_options.keys()), key="vu_contract")
+                contract_id = contract_options[selected_label]
+
+                uploaded_file = st.file_uploader(
+                    "选择新版本文件",
+                    type=["pdf", "doc", "docx"],
+                    key="version_upload_file"
+                )
+
+                version_note = st.text_area("版本说明备注", value="", key="version_note")
+                uploaded_by = st.text_input("上传人", value="demo_user", key="version_uploaded_by")
+
+                if uploaded_file is not None:
+                    st.info(f"已选择文件: {uploaded_file.name} ({uploaded_file.size / 1024:.1f} KB)")
+
+                    if st.button("🚀 上传新版本", type="primary"):
+                        with st.spinner("正在上传并解析新版本..."):
+                            files = {"file": (uploaded_file.name, uploaded_file.getvalue(), uploaded_file.type)}
+                            data = {
+                                "versionNote": version_note,
+                                "uploadedBy": uploaded_by
+                            }
+                            result = api_call("POST", f"/versions/{contract_id}/upload", files=files, data=data)
+
+                            if result and result.get("success"):
+                                vdata = result.get("data", {})
+                                st.success(f"✅ 新版本上传成功！版本: {vdata.get('versionLabel')}")
+                            else:
+                                st.error(f"上传失败: {result.get('message', '未知错误') if result else '未知错误'}")
+
+    with tab_diff:
+        contracts = api_call("GET", "/contracts")
+        if contracts and contracts.get("success"):
+            contract_list = contracts.get("data", [])
+            if not contract_list:
+                st.info("暂无合同")
+            else:
+                contract_options = {f"ID:{c.get('id')} - {c.get('title', '无标题')[:40]}": c.get("id") for c in contract_list}
+                selected_label = st.selectbox("选择合同", list(contract_options.keys()), key="diff_contract")
+                contract_id = contract_options[selected_label]
+
+                versions_resp = api_call("GET", f"/versions/{contract_id}/versions")
+                if versions_resp and versions_resp.get("success"):
+                    version_list = versions_resp.get("data", [])
+                    if len(version_list) < 2:
+                        st.info("至少需要2个版本才能进行对比")
+                    else:
+                        v_options = {f"{v.get('versionLabel')} (ID:{v.get('id')})": v.get("versionNumber") for v in version_list}
+                        col1, col2 = st.columns(2)
+                        with col1:
+                            from_v = st.selectbox("源版本", list(v_options.keys()), index=len(v_options)-1, key="diff_from")
+                        with col2:
+                            to_v = st.selectbox("目标版本", list(v_options.keys()), key="diff_to")
+
+                        if st.button("🔍 查看变更详情", type="primary"):
+                            from_num = v_options[from_v]
+                            to_num = v_options[to_v]
+
+                            with st.spinner("正在生成变更详情..."):
+                                diff_result = api_call("GET",
+                                    f"/versions/{contract_id}/diff",
+                                    params={"fromVersion": from_num, "toVersion": to_num})
+
+                                if diff_result and diff_result.get("success"):
+                                    diff_data = diff_result.get("data", {})
+
+                                    col1, col2, col3 = st.columns(3)
+                                    with col1:
+                                        st.metric("➕ 新增条款", diff_data.get("addedClausesCount", 0))
+                                    with col2:
+                                        st.metric("➖ 删除条款", diff_data.get("removedClausesCount", 0))
+                                    with col3:
+                                        st.metric("✏️ 修改条款", diff_data.get("modifiedClausesCount", 0))
+
+                                    st.markdown("---")
+
+                                    for diff in diff_data.get("diffs", []):
+                                        change_type = diff.get("changeType")
+                                        icon = {"ADDED": "➕", "REMOVED": "➖", "MODIFIED": "✏️"}.get(change_type, "•")
+                                        color = {"ADDED": "green", "REMOVED": "red", "MODIFIED": "orange"}.get(change_type, "blue")
+
+                                        risk_warning = ""
+                                        if diff.get("introducesNewRisk"):
+                                            risk_warning = " ⚠️引入新风险"
+
+                                        with st.expander(
+                                            f'{icon} [{change_type}] {diff.get("clauseNumber")} {diff.get("clauseTitle")}{risk_warning}',
+                                            expanded=diff.get("introducesNewRisk", False)
+                                        ):
+                                            if diff.get("introducesNewRisk"):
+                                                st.error(f"⚠️ 此变更引入了新风险！{diff.get('newRiskDescription', '')}")
+
+                                            if change_type == "ADDED":
+                                                st.success("**新增内容:**")
+                                                st.write(diff.get("newContent"))
+                                            elif change_type == "REMOVED":
+                                                st.error("**删除内容:**")
+                                                st.write(diff.get("oldContent"))
+                                            else:
+                                                col1, col2 = st.columns(2)
+                                                with col1:
+                                                    st.warning("**原内容:**")
+                                                    st.write(diff.get("oldContent"))
+                                                with col2:
+                                                    st.info("**新内容:**")
+                                                    st.write(diff.get("newContent"))
+                                                st.caption(f"相似度: {diff.get('similarity', 0):.2%}")
+
+                                            text_diffs = diff.get("textDiffs", [])
+                                            if text_diffs:
+                                                st.markdown("**逐行对比:**")
+                                                for seg in text_diffs:
+                                                    seg_type = seg.get("type")
+                                                    seg_text = seg.get("text")
+                                                    if seg_type == "added":
+                                                        st.markdown(f'<div style="background-color:#d4edda;padding:2px 8px;border-left:3px solid #28a745;">+ {seg_text}</div>', unsafe_allow_html=True)
+                                                    elif seg_type == "removed":
+                                                        st.markdown(f'<div style="background-color:#f8d7da;padding:2px 8px;border-left:3px solid #dc3545;">- {seg_text}</div>', unsafe_allow_html=True)
+                                                    else:
+                                                        st.markdown(f'<div style="padding:2px 8px;color:#6c757d;">&nbsp; {seg_text}</div>', unsafe_allow_html=True)
+
+    with tab_impact:
+        contracts = api_call("GET", "/contracts")
+        if contracts and contracts.get("success"):
+            contract_list = contracts.get("data", [])
+            if not contract_list:
+                st.info("暂无合同")
+            else:
+                contract_options = {f"ID:{c.get('id')} - {c.get('title', '无标题')[:40]}": c.get("id") for c in contract_list}
+                selected_label = st.selectbox("选择合同", list(contract_options.keys()), key="impact_contract")
+                contract_id = contract_options[selected_label]
+
+                versions_resp = api_call("GET", f"/versions/{contract_id}/versions")
+                if versions_resp and versions_resp.get("success"):
+                    version_list = versions_resp.get("data", [])
+                    if len(version_list) < 2:
+                        st.info("至少需要2个版本才能进行影响评估")
+                    else:
+                        v_options = {f"{v.get('versionLabel')} (ID:{v.get('id')})": v.get("versionNumber") for v in version_list}
+                        col1, col2 = st.columns(2)
+                        with col1:
+                            from_v = st.selectbox("源版本", list(v_options.keys()), index=len(v_options)-1, key="impact_from")
+                        with col2:
+                            to_v = st.selectbox("目标版本", list(v_options.keys()), key="impact_to")
+
+                        if st.button("🎯 生成影响评估报告", type="primary"):
+                            from_num = v_options[from_v]
+                            to_num = v_options[to_v]
+
+                            with st.spinner("正在生成影响评估..."):
+                                impact_result = api_call("GET",
+                                    f"/versions/{contract_id}/impact",
+                                    params={"fromVersion": from_num, "toVersion": to_num})
+
+                                if impact_result and impact_result.get("success"):
+                                    impact = impact_result.get("data", {})
+
+                                    col1, col2, col3 = st.columns(3)
+                                    with col1:
+                                        st.metric(f"源版本评分 ({impact.get('fromVersionLabel')})",
+                                                  impact.get("fromRiskScore", "N/A"))
+                                    with col2:
+                                        st.metric(f"目标版本评分 ({impact.get('toVersionLabel')})",
+                                                  impact.get("toRiskScore", "N/A"))
+                                    with col3:
+                                        change = impact.get("riskScoreChange", 0)
+                                        delta_str = f"+{change}" if change > 0 else str(change)
+                                        st.metric("评分变化", delta_str)
+
+                                    st.markdown("---")
+
+                                    trends = impact.get("sectionRiskTrends", [])
+                                    if trends:
+                                        st.markdown('<p class="sub-header">📊 各章节风险变化趋势</p>', unsafe_allow_html=True)
+                                        for t in trends:
+                                            trend_icon = "📈" if t.get("trend") == "升高" else "📉" if t.get("trend") == "降低" else "➡️"
+                                            trend_color = "#e74c3c" if t.get("trend") == "升高" else "#27ae60" if t.get("trend") == "降低" else "#f39c12"
+                                            st.markdown(
+                                                f'{trend_icon} **{t.get("sectionChineseName")}**: '
+                                                f'<span style="color:{trend_color}">{t.get("trend")}</span> '
+                                                f'({t.get("fromCount")} → {t.get("toCount")})',
+                                                unsafe_allow_html=True
+                                            )
+
+                                    new_risks = impact.get("newRiskItems", [])
+                                    if new_risks:
+                                        st.markdown('<p class="sub-header">🔴 新增风险项</p>', unsafe_allow_html=True)
+                                        for r in new_risks:
+                                            level_icon = {"HIGH": "🔴", "MEDIUM": "🟡", "LOW": "🟢"}.get(r.get("riskLevel"), "•")
+                                            with st.expander(f'{level_icon} {r.get("ruleName")} - {r.get("clauseNumber", "")}'):
+                                                st.write("**风险描述:**", r.get("riskDescription"))
+                                                st.write("**修改建议:**", r.get("suggestion"))
+
+                                    eliminated = impact.get("eliminatedRiskItems", [])
+                                    if eliminated:
+                                        st.markdown('<p class="sub-header">🟢 消除风险项</p>', unsafe_allow_html=True)
+                                        for r in eliminated:
+                                            st.markdown(f'✅ {r.get("ruleName")} - {r.get("clauseNumber", "")}')
+
+                                    suggestions = impact.get("modificationSuggestions", [])
+                                    if suggestions:
+                                        st.markdown('<p class="sub-header">💡 修改建议汇总</p>', unsafe_allow_html=True)
+                                        for s in suggestions:
+                                            st.info(s)
+
+
+def show_audit_log_page():
+    st.markdown('<p class="main-header">📜 审计日志</p>', unsafe_allow_html=True)
+
+    col1, col2, col3, col4 = st.columns(4)
+    with col1:
+        operator_filter = st.text_input("操作人", value="", key="audit_operator")
+    with col2:
+        operation_type_filter = st.selectbox(
+            "操作类型",
+            ["", "UPLOAD_VERSION", "VIEW_VERSION", "ROLLBACK_VERSION", "EXPORT_REPORT", "VIEW_CHANGE_DIFF", "IMPACT_ASSESSMENT"],
+            key="audit_op_type"
+        )
+    with col3:
+        contract_id_filter = st.text_input("合同ID", value="", key="audit_contract_id")
+    with col4:
+        page_size = st.selectbox("每页条数", [20, 50, 100], index=0, key="audit_page_size")
+
+    current_page = st.number_input("页码", min_value=0, value=0, step=1, key="audit_page")
+
+    if st.button("🔍 查询审计日志", type="primary"):
+        params = {"page": current_page, "size": page_size}
+        if operator_filter:
+            params["operator"] = operator_filter
+        if operation_type_filter:
+            params["operationType"] = operation_type_filter
+        if contract_id_filter:
+            try:
+                params["contractId"] = int(contract_id_filter)
+            except ValueError:
+                pass
+
+        result = api_call("GET", "/audit-logs", params=params)
+
+        if result and result.get("success"):
+            page_data = result.get("data", {})
+            logs = page_data.get("content", [])
+            total_elements = page_data.get("totalElements", 0)
+            total_pages = page_data.get("totalPages", 0)
+
+            st.info(f"共 {total_elements} 条记录，第 {current_page + 1}/{total_pages} 页")
+
+            if not logs:
+                st.warning("无匹配的审计日志")
+            else:
+                for log_entry in logs:
+                    result_icon = "✅" if log_entry.get("operationResult") == "SUCCESS" else "❌"
+                    type_label = {
+                        "UPLOAD_VERSION": "📤 上传版本",
+                        "VIEW_VERSION": "👁️ 查看版本",
+                        "ROLLBACK_VERSION": "⏪ 回滚版本",
+                        "EXPORT_REPORT": "📄 导出报告",
+                        "VIEW_CHANGE_DIFF": "📊 查看变更",
+                        "IMPACT_ASSESSMENT": "🎯 影响评估"
+                    }.get(log_entry.get("operationType", ""), log_entry.get("operationType", ""))
+
+                    with st.expander(
+                        f'{result_icon} {type_label} - {log_entry.get("operator")} | '
+                        f'{log_entry.get("operationTime", "")[:19]}'
+                    ):
+                        col1, col2, col3 = st.columns(3)
+                        with col1:
+                            st.write(f"**操作人:** {log_entry.get('operator')}")
+                            st.write(f"**操作类型:** {log_entry.get('operationType')}")
+                        with col2:
+                            st.write(f"**合同ID:** {log_entry.get('targetContractId', 'N/A')}")
+                            st.write(f"**版本ID:** {log_entry.get('targetVersionId', 'N/A')}")
+                        with col3:
+                            st.write(f"**结果:** {log_entry.get('operationResult')}")
+                            st.write(f"**时间:** {log_entry.get('operationTime', '')[:19]}")
+
+                        if log_entry.get("detail"):
+                            st.write(f"**详情:** {log_entry.get('detail')}")
+
+            col1, col2, col3 = st.columns([1, 2, 1])
+            with col1:
+                if current_page > 0:
+                    if st.button("⬅️ 上一页"):
+                        st.session_state["audit_page"] = current_page - 1
+                        st.rerun()
+            with col3:
+                if current_page < total_pages - 1:
+                    if st.button("➡️ 下一页"):
+                        st.session_state["audit_page"] = current_page + 1
+                        st.rerun()
+        else:
+            st.error("查询审计日志失败")
+

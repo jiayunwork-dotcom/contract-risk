@@ -17,4 +17,6 @@ public interface RiskReportRepository extends JpaRepository<RiskReport, Long> {
     boolean existsByContractId(@Param("contractId") Long contractId);
 
     void deleteByContractId(Long contractId);
+
+    Optional<RiskReport> findByVersionId(Long versionId);
 }

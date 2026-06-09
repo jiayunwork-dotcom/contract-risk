@@ -27,4 +27,9 @@ public interface ContractClauseRepository extends JpaRepository<ContractClause, 
     List<Object[]> countRisksBySection(@Param("contractId") Long contractId);
 
     void deleteByContractId(Long contractId);
+
+    List<ContractClause> findByVersionIdOrderBySortOrderAsc(Long versionId);
+
+    @Query("SELECT cc FROM ContractClause cc WHERE cc.version.id = :versionId ORDER BY cc.sortOrder ASC")
+    List<ContractClause> findByVersionId(@Param("versionId") Long versionId);
 }

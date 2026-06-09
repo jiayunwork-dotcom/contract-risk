@@ -26,4 +26,5 @@ public class ContractUploadResponse {
     private LocalDateTime signingDate;
     private int clauseCount;
     private LocalDateTime createdAt;
+    private Long currentVersionId;
 }

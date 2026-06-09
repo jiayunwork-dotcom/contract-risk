@@ -20,6 +20,10 @@ public class ContractClause {
     @JoinColumn(name = "contract_id", nullable = false)
     private Contract contract;
 
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "version_id")
+    private ContractVersion version;
+
     @Column(name = "clause_number", length = 50)
     private String clauseNumber;
 

@@ -4,11 +4,14 @@ import com.contractrisk.config.ContractConfig;
 import com.contractrisk.dto.BatchAnalysisResult;
 import com.contractrisk.entity.Contract;
 import com.contractrisk.entity.ContractClause;
+import com.contractrisk.entity.ContractVersion;
 import com.contractrisk.entity.RiskItem;
 import com.contractrisk.entity.RiskReport;
 import com.contractrisk.entity.enums.ClauseSection;
 import com.contractrisk.entity.enums.RiskLevel;
 import com.contractrisk.engine.RiskEngine;
+import com.contractrisk.repository.ContractClauseRepository;
+import com.contractrisk.repository.ContractVersionRepository;
 import com.contractrisk.repository.RiskItemRepository;
 import com.contractrisk.repository.RiskReportRepository;
 import com.fasterxml.jackson.core.JsonProcessingException;
@@ -30,6 +33,8 @@ public class RiskAnalysisService {
     private final RiskEngine riskEngine;
     private final RiskItemRepository riskItemRepository;
     private final RiskReportRepository riskReportRepository;
+    private final ContractClauseRepository clauseRepository;
+    private final ContractVersionRepository versionRepository;
     private final ContractService contractService;
     private final ContractConfig contractConfig;
     private final ObjectMapper objectMapper;
@@ -195,6 +200,61 @@ public class RiskAnalysisService {
 
     public Optional<RiskReport> getReportByContractId(Long contractId) {
         return riskReportRepository.findByContractId(contractId);
+    }
+
+    public Optional<RiskReport> getReportByVersionId(Long versionId) {
+        return riskReportRepository.findByVersionId(versionId);
+    }
+
+    @Transactional
+    public RiskReport analyzeByVersion(Long contractId, Long versionId) {
+        Contract contract = contractService.getContractById(contractId)
+                .orElseThrow(() -> new IllegalArgumentException("合同不存在: " + contractId));
+        ContractVersion version = versionRepository.findById(versionId)
+                .orElseThrow(() -> new IllegalArgumentException("版本不存在: " + versionId));
+
+        List<ContractClause> clauses = clauseRepository.findByVersionId(versionId);
+        contract.setClauses(clauses);
+
+        List<RiskItem> existingRisks = riskItemRepository.findByContractId(contractId).stream()
+                .filter(r -> r.getClause() != null && r.getClause().getVersion() != null
+                        && r.getClause().getVersion().getId().equals(versionId))
+                .collect(java.util.stream.Collectors.toList());
+        riskItemRepository.deleteAll(existingRisks);
+
+        List<RiskItem> risks = riskEngine.analyzeContract(contract);
+
+        ContractConfig.Risk riskConfig = contractConfig.getRisk();
+        for (RiskItem risk : risks) {
+            int weight = riskEngine.calculatePenaltyScore(
+                    List.of(risk), riskConfig.getHighPenalty(),
+                    riskConfig.getMediumPenalty(), riskConfig.getLowPenalty()
+            );
+            risk.setPenaltyScore(weight);
+        }
+
+        riskItemRepository.saveAll(risks);
+
+        for (ContractClause clause : clauses) {
+            clause.setRiskCount((int) risks.stream()
+                    .filter(r -> r.getClause().getId().equals(clause.getId())).count());
+            clause.setHighRisk(risks.stream()
+                    .filter(r -> r.getClause().getId().equals(clause.getId()))
+                    .anyMatch(r -> r.getRiskLevel() == RiskLevel.HIGH));
+        }
+        clauseRepository.saveAll(clauses);
+
+        Optional<RiskReport> existingReport = riskReportRepository.findByVersionId(versionId);
+        existingReport.ifPresent(riskReportRepository::delete);
+
+        RiskReport report = generateReport(contract, risks);
+        report.setVersion(version);
+        report = riskReportRepository.save(report);
+
+        log.info("版本风险分析完成，合同ID: {}, 版本ID: {}, 风险项: {}, 风险评分: {}",
+                contractId, versionId, risks.size(), report.getRiskScore());
+
+        return report;
     }
 
     public List<RiskItem> getRiskItemsByContractId(Long contractId) {
