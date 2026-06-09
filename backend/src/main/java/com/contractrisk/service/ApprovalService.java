@@ -218,7 +218,46 @@ public class ApprovalService {
                 "approved", workflowRepository.countByStatus(ApprovalStatus.APPROVED),
                 "rejected", workflowRepository.countByStatus(ApprovalStatus.REJECTED),
                 "needsModification", workflowRepository.countByStatus(ApprovalStatus.NEEDS_MODIFICATION),
-                "escalated", workflowRepository.countByStatus(ApprovalStatus.ESCALATED)
+                "escalated", workflowRepository.countByStatus(ApprovalStatus.ESCALATED),
+                "urged", workflowRepository.countByStatus(ApprovalStatus.URGED)
         );
+    }
+
+    @Transactional
+    public ApprovalWorkflow urgeApproval(Long workflowId, String remindedBy) {
+        ApprovalWorkflow workflow = workflowRepository.findById(workflowId)
+                .orElseThrow(() -> new IllegalArgumentException("审批流程不存在: " + workflowId));
+
+        if (workflow.getStatus() == ApprovalStatus.APPROVED ||
+                workflow.getStatus() == ApprovalStatus.REJECTED) {
+            throw new IllegalStateException("审批流程已结束，无法催办");
+        }
+
+        if (workflow.getLastRemindedAt() != null) {
+            LocalDateTime now = LocalDateTime.now();
+            LocalDateTime lastReminded = workflow.getLastRemindedAt();
+            if (lastReminded.plusHours(24).isAfter(now)) {
+                throw new IllegalStateException("24小时内已催办过，请稍后再试。上次催办时间: " +
+                        lastReminded.format(java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss")));
+            }
+        }
+
+        ApprovalStatus originalStatus = workflow.getStatus();
+        workflow.setLastRemindedAt(LocalDateTime.now());
+
+        ApprovalRecord record = new ApprovalRecord();
+        record.setWorkflow(workflow);
+        record.setAction(ApprovalStatus.URGED);
+        record.setApprover(remindedBy);
+        record.setRemindBy(remindedBy);
+        record.setComments("催办审批 - 原状态: " + originalStatus);
+        record.setApprovalLevel(workflow.getCurrentLevel());
+        recordRepository.save(record);
+
+        workflow = workflowRepository.save(workflow);
+
+        log.info("审批催办，工作流ID: {}, 催办人: {}, 原状态: {}", workflowId, remindedBy, originalStatus);
+
+        return workflow;
     }
 }

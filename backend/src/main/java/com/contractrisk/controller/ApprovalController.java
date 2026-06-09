@@ -127,6 +127,24 @@ public class ApprovalController {
         return ApiResponse.success(stats);
     }
 
+    @PostMapping("/urge/{workflowId}")
+    public ApiResponse<ApprovalWorkflow> urgeApproval(
+            @PathVariable Long workflowId,
+            @RequestBody UrgeApprovalRequest request) {
+        try {
+            ApprovalWorkflow workflow = approvalService.urgeApproval(
+                    workflowId,
+                    request.getRemindedBy()
+            );
+            return ApiResponse.success("催办成功", workflow);
+        } catch (IllegalArgumentException | IllegalStateException e) {
+            return ApiResponse.error(e.getMessage());
+        } catch (Exception e) {
+            log.error("催办失败", e);
+            return ApiResponse.error("催办失败: " + e.getMessage());
+        }
+    }
+
     @Data
     public static class SubmitApprovalRequest {
         private String submitter;
@@ -144,5 +162,10 @@ public class ApprovalController {
     public static class EscalateApprovalRequest {
         private String escalatedApprover;
         private String reason;
+    }
+
+    @Data
+    public static class UrgeApprovalRequest {
+        private String remindedBy;
     }
 }

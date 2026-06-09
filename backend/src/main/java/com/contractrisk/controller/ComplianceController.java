@@ -4,8 +4,12 @@ import com.contractrisk.dto.ApiResponse;
 import com.contractrisk.entity.ComplianceTemplate;
 import com.contractrisk.entity.enums.ContractType;
 import com.contractrisk.service.ComplianceService;
+import com.contractrisk.service.PdfExportService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.MediaType;
+import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
@@ -20,6 +24,7 @@ import java.util.Optional;
 public class ComplianceController {
 
     private final ComplianceService complianceService;
+    private final PdfExportService pdfExportService;
 
     @PostMapping("/check/{contractId}")
     public ApiResponse<Map<String, Object>> checkCompliance(@PathVariable Long contractId) {
@@ -67,6 +72,24 @@ public class ComplianceController {
             return ApiResponse.success("模板已删除", null);
         } else {
             return ApiResponse.error("模板不存在");
+        }
+    }
+
+    @GetMapping("/export-pdf/{contractId}")
+    public ResponseEntity<byte[]> exportCompliancePdf(@PathVariable Long contractId) {
+        try {
+            byte[] pdfBytes = pdfExportService.exportComplianceReport(contractId);
+            HttpHeaders headers = new HttpHeaders();
+            headers.setContentType(MediaType.APPLICATION_PDF);
+            headers.setContentDispositionFormData("attachment",
+                    "compliance_report_" + contractId + ".pdf");
+            headers.setContentLength(pdfBytes.length);
+            return ResponseEntity.ok()
+                    .headers(headers)
+                    .body(pdfBytes);
+        } catch (Exception e) {
+            log.error("PDF导出失败", e);
+            return ResponseEntity.internalServerError().build();
         }
     }
 }

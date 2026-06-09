@@ -187,12 +187,20 @@ public class RiskEngine {
     public int calculatePenaltyScore(List<RiskItem> risks, int highPenalty, int mediumPenalty, int lowPenalty) {
         int score = 0;
         for (RiskItem risk : risks) {
-            switch (risk.getRiskLevel()) {
-                case HIGH -> score += highPenalty;
-                case MEDIUM -> score += mediumPenalty;
-                case LOW -> score += lowPenalty;
-            }
+            int weight = getWeightForRisk(risk, highPenalty, mediumPenalty, lowPenalty);
+            score += weight;
         }
         return score;
+    }
+
+    private int getWeightForRisk(RiskItem risk, int highPenalty, int mediumPenalty, int lowPenalty) {
+        if (risk.getRiskRule() != null && risk.getRiskRule().getCustomWeight() != null) {
+            return risk.getRiskRule().getCustomWeight();
+        }
+        return switch (risk.getRiskLevel()) {
+            case HIGH -> highPenalty;
+            case MEDIUM -> mediumPenalty;
+            case LOW -> lowPenalty;
+        };
     }
 }

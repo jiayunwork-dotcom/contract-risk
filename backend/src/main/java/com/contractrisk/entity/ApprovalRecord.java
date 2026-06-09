@@ -33,6 +33,9 @@ public class ApprovalRecord {
     @Column(name = "approval_level")
     private Integer approvalLevel;
 
+    @Column(name = "remind_by", length = 100)
+    private String remindBy;
+
     @CreationTimestamp
     @Column(name = "created_at", updatable = false)
     private LocalDateTime createdAt;

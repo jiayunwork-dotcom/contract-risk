@@ -1,6 +1,7 @@
 package com.contractrisk.service;
 
 import com.contractrisk.config.ContractConfig;
+import com.contractrisk.dto.BatchAnalysisResult;
 import com.contractrisk.entity.Contract;
 import com.contractrisk.entity.ContractClause;
 import com.contractrisk.entity.RiskItem;
@@ -14,6 +15,7 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -43,6 +45,16 @@ public class RiskAnalysisService {
         riskItemRepository.deleteByClauseContractId(contractId);
 
         List<RiskItem> risks = riskEngine.analyzeContract(contract);
+
+        ContractConfig.Risk riskConfig = contractConfig.getRisk();
+        for (RiskItem risk : risks) {
+            int weight = riskEngine.calculatePenaltyScore(
+                    List.of(risk), riskConfig.getHighPenalty(),
+                    riskConfig.getMediumPenalty(), riskConfig.getLowPenalty()
+            );
+            risk.setPenaltyScore(weight);
+        }
+
         riskItemRepository.saveAll(risks);
 
         for (ContractClause clause : contract.getClauses()) {
@@ -191,5 +203,70 @@ public class RiskAnalysisService {
 
     public List<RiskItem> getRiskItemsByContractIdAndLevel(Long contractId, RiskLevel level) {
         return riskItemRepository.findByContractIdAndRiskLevel(contractId, level);
+    }
+
+    private final Map<String, BatchAnalysisResult> batchProgressMap = new java.util.concurrent.ConcurrentHashMap<>();
+
+    public String startBatchAnalysis(List<Long> contractIds) {
+        String batchId = UUID.randomUUID().toString().replace("-", "").substring(0, 12);
+        BatchAnalysisResult result = new BatchAnalysisResult();
+        result.setBatchId(batchId);
+        result.setTotal(contractIds.size());
+        result.setCompleted(0);
+        result.setFinished(false);
+        result.setRankings(new ArrayList<>());
+        batchProgressMap.put(batchId, result);
+
+        executeBatchAsync(batchId, contractIds);
+
+        return batchId;
+    }
+
+    @Async
+    public void executeBatchAsync(String batchId, List<Long> contractIds) {
+        BatchAnalysisResult result = batchProgressMap.get(batchId);
+        List<BatchAnalysisResult.ContractRiskRanking> rankings = Collections.synchronizedList(new ArrayList<>());
+
+        for (Long contractId : contractIds) {
+            try {
+                RiskReport report = analyzeContract(contractId);
+                Contract contract = contractService.getContractById(contractId).orElse(null);
+
+                BatchAnalysisResult.ContractRiskRanking ranking = new BatchAnalysisResult.ContractRiskRanking();
+                ranking.setContractId(contractId);
+                ranking.setContractTitle(contract != null ? contract.getTitle() : "未知");
+                ranking.setRiskScore(report.getRiskScore());
+                ranking.setHighRiskCount(report.getHighRiskCount());
+                ranking.setMediumRiskCount(report.getMediumRiskCount());
+                ranking.setLowRiskCount(report.getLowRiskCount());
+                ranking.setTotalRiskCount(report.getTotalRiskCount());
+                rankings.add(ranking);
+            } catch (Exception e) {
+                log.error("批量分析 - 合同ID {} 分析失败: {}", contractId, e.getMessage());
+                BatchAnalysisResult.ContractRiskRanking ranking = new BatchAnalysisResult.ContractRiskRanking();
+                ranking.setContractId(contractId);
+                ranking.setContractTitle("分析失败");
+                ranking.setRiskScore(BigDecimal.ZERO);
+                rankings.add(ranking);
+            }
+
+            result.setCompleted(result.getCompleted() + 1);
+        }
+
+        rankings.sort((a, b) -> b.getRiskScore().compareTo(a.getRiskScore()));
+        for (int i = 0; i < rankings.size(); i++) {
+            rankings.get(i).setRank(i + 1);
+        }
+
+        result.setRankings(rankings);
+        result.setFinished(true);
+    }
+
+    public BatchAnalysisResult getBatchProgress(String batchId) {
+        BatchAnalysisResult result = batchProgressMap.get(batchId);
+        if (result == null) {
+            throw new IllegalArgumentException("批量任务不存在: " + batchId);
+        }
+        return result;
     }
 }

@@ -55,6 +55,9 @@ public class RiskItem {
     @Column(name = "match_length")
     private Integer matchLength;
 
+    @Column(name = "penalty_score")
+    private Integer penaltyScore;
+
     @CreationTimestamp
     @Column(name = "created_at", updatable = false)
     private LocalDateTime createdAt;

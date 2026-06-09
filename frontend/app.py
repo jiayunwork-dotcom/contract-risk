@@ -136,6 +136,8 @@ def get_score_class(score):
     else:
         return "score-danger"
 
+DEFAULT_WEIGHTS = {"HIGH": 20, "MEDIUM": 10, "LOW": 5}
+
 def main():
     st.sidebar.title("📋 合同风险审查系统")
     st.sidebar.markdown("---")
@@ -216,10 +218,11 @@ def show_home_page():
         st.markdown("""
         - **📄 文档处理**: 支持PDF、Word格式解析，扫描件OCR识别
         - **🏗️ 结构解析**: 自动识别合同章节结构，智能条款分割
-        - **🔍 风险识别**: 21条内置规则引擎 + NLP辅助识别
-        - **✅ 合规检查**: 多类型合规模板，必备/禁止条款检查
+        - **🔍 风险识别**: 21条内置规则引擎 + NLP辅助识别 + 自定义权重
+        - **✅ 合规检查**: 多类型合规模板，必备/禁止条款检查，PDF报告导出
         - **⚖️ 合同对比**: 条款级Diff对比，新风险自动识别
-        - **📝 审批管理**: 多级审批流程，48小时自动升级
+        - **📝 审批管理**: 多级审批流程，48小时自动升级，催办功能
+        - **🔄 批量分析**: 多合同批量风险分析，评分排名
         """)
 
     with col2:
@@ -243,13 +246,13 @@ def show_home_page():
 
     col1, col2, col3 = st.columns(3)
     with col1:
-        st.info("🔴 高风险: 每条扣20分")
+        st.info("🔴 高风险: 默认扣20分(可自定义)")
     with col2:
-        st.warning("🟡 中风险: 每条扣10分")
+        st.warning("🟡 中风险: 默认扣10分(可自定义)")
     with col3:
-        st.success("🟢 低风险: 每条扣5分")
+        st.success("🟢 低风险: 默认扣5分(可自定义)")
 
-    st.info("💡 缺失必备条款扣30分，出现禁止条款扣50分。低于60分建议拒签。")
+    st.info("💡 每条规则可单独设置扣分权重，未设置则使用默认值。缺失必备条款扣30分，出现禁止条款扣50分。低于60分建议拒签。")
 
 def show_upload_page():
     st.markdown('<p class="main-header">📤 合同上传</p>', unsafe_allow_html=True)
@@ -333,167 +336,249 @@ def show_upload_page():
 def show_risk_analysis_page():
     st.markdown('<p class="main-header">🔍 风险分析</p>', unsafe_allow_html=True)
 
-    contract_id = st.number_input(
-        "输入合同ID",
-        min_value=1,
-        value=st.session_state.get("last_contract_id", 1),
-        step=1
-    )
+    tab_single, tab_batch = st.tabs(["🔍 单合同分析", "🔄 批量分析"])
 
-    col1, col2 = st.columns([1, 4])
+    with tab_single:
+        contract_id = st.number_input(
+            "输入合同ID",
+            min_value=1,
+            value=st.session_state.get("last_contract_id", 1),
+            step=1
+        )
 
-    with col1:
-        if st.button("🔍 开始风险分析", type="primary"):
-            with st.spinner("正在分析风险..."):
-                result = api_call("POST", f"/risk/analyze/{contract_id}")
-                if result and result.get("success"):
-                    st.success("分析完成！")
-                    st.rerun()
+        col1, col2 = st.columns([1, 4])
 
-        if st.button("📊 查看已有报告"):
-            pass
+        with col1:
+            if st.button("🔍 开始风险分析", type="primary"):
+                with st.spinner("正在分析风险..."):
+                    result = api_call("POST", f"/risk/analyze/{contract_id}")
+                    if result and result.get("success"):
+                        st.success("分析完成！")
+                        st.rerun()
 
-    report = api_call("GET", f"/risk/report/{contract_id}")
+            if st.button("📊 查看已有报告"):
+                pass
 
-    if report and report.get("success"):
-        report_data = report.get("data", {})
-        risk_score = report_data.get("riskScore", 100)
-        if isinstance(risk_score, (int, float)):
-            risk_score = int(risk_score)
-        else:
-            risk_score = 100
+        report = api_call("GET", f"/risk/report/{contract_id}")
 
-        score_class = get_score_class(risk_score)
-
-        col1, col2, col3 = st.columns([1, 2, 1])
-        with col2:
-            st.markdown(
-                f'<div class="score-box {score_class}">风险评分: {risk_score}/100</div>',
-                unsafe_allow_html=True
-            )
-
-            if report_data.get("recommendedReject"):
-                st.error("⚠️ 建议拒签")
-            elif risk_score < 80:
-                st.warning("⚠️ 谨慎签署")
+        if report and report.get("success"):
+            report_data = report.get("data", {})
+            risk_score = report_data.get("riskScore", 100)
+            if isinstance(risk_score, (int, float)):
+                risk_score = int(risk_score)
             else:
-                st.success("✅ 建议签署")
+                risk_score = 100
 
-        col1, col2, col3, col4 = st.columns(4)
-        with col1:
-            st.metric("🔴 高风险", report_data.get("highRiskCount", 0))
-        with col2:
-            st.metric("🟡 中风险", report_data.get("mediumRiskCount", 0))
-        with col3:
-            st.metric("🟢 低风险", report_data.get("lowRiskCount", 0))
-        with col4:
-            st.metric("📊 总计", report_data.get("totalRiskCount", 0))
+            score_class = get_score_class(risk_score)
 
-        st.markdown("---")
-
-        col1, col2 = st.columns([3, 2])
-
-        with col1:
-            st.markdown('<p class="sub-header">📝 风险详情</p>', unsafe_allow_html=True)
-
-            risk_items = api_call("GET", f"/risk/items/{contract_id}")
-            if risk_items and risk_items.get("success"):
-                items = risk_items.get("data", [])
-
-                level_filter = st.multiselect(
-                    "筛选风险等级",
-                    ["HIGH", "MEDIUM", "LOW"],
-                    default=["HIGH", "MEDIUM", "LOW"],
-                    format_func=lambda x: {"HIGH": "🔴 高", "MEDIUM": "🟡 中", "LOW": "🟢 低"}.get(x, x)
+            col1, col2, col3 = st.columns([1, 2, 1])
+            with col2:
+                st.markdown(
+                    f'<div class="score-box {score_class}">风险评分: {risk_score}/100</div>',
+                    unsafe_allow_html=True
                 )
 
-                for item in items:
-                    level = item.get("riskLevel")
-                    if level not in level_filter:
-                        continue
+                if report_data.get("recommendedReject"):
+                    st.error("⚠️ 建议拒签")
+                elif risk_score < 80:
+                    st.warning("⚠️ 谨慎签署")
+                else:
+                    st.success("✅ 建议签署")
 
-                    card_class = f"card card-{level.lower()}"
-                    risk_class = get_risk_class(level)
-                    level_label = {"HIGH": "🔴 高风险", "MEDIUM": "🟡 中风险", "LOW": "🟢 低风险"}.get(level, level)
+            col1, col2, col3, col4 = st.columns(4)
+            with col1:
+                st.metric("🔴 高风险", report_data.get("highRiskCount", 0))
+            with col2:
+                st.metric("🟡 中风险", report_data.get("mediumRiskCount", 0))
+            with col3:
+                st.metric("🟢 低风险", report_data.get("lowRiskCount", 0))
+            with col4:
+                st.metric("📊 总计", report_data.get("totalRiskCount", 0))
 
-                    with st.expander(
-                        f"{level_label}: {item.get('ruleName')} | 条款: {item.get('clause', {}).get('clauseNumber', 'N/A')}"
-                    ):
-                        st.markdown(f'<div class="{card_class}">', unsafe_allow_html=True)
-                        st.write("**风险说明:**", item.get("riskDescription"))
-                        st.write("**原文引用:**")
-                        st.info(item.get("originalText"))
-                        if item.get("matchedText"):
-                            st.write("**匹配内容:**")
-                            st.error(item.get("matchedText"))
-                        st.write("**修改建议:**", item.get("suggestion"))
+            st.markdown("---")
 
-                        if item.get("alternativePhrases"):
-                            with st.expander("💡 参考替代表述"):
-                                for phrase in item.get("alternativePhrases", "").split("\n"):
-                                    if phrase.strip():
-                                        st.success(phrase.strip())
+            col1, col2 = st.columns([3, 2])
 
-                        if item.get("fromNlp"):
-                            st.caption("🤖 由NLP辅助识别")
+            with col1:
+                st.markdown('<p class="sub-header">📝 风险详情</p>', unsafe_allow_html=True)
 
-                        st.markdown('</div>', unsafe_allow_html=True)
+                risk_items = api_call("GET", f"/risk/items/{contract_id}")
+                if risk_items and risk_items.get("success"):
+                    items = risk_items.get("data", [])
 
-        with col2:
-            st.markdown('<p class="sub-header">📊 分析摘要</p>', unsafe_allow_html=True)
-            st.info(report_data.get("summary", "暂无摘要"))
-            st.warning(report_data.get("recommendation", "暂无建议"))
+                    level_filter = st.multiselect(
+                        "筛选风险等级",
+                        ["HIGH", "MEDIUM", "LOW"],
+                        default=["HIGH", "MEDIUM", "LOW"],
+                        format_func=lambda x: {"HIGH": "🔴 高", "MEDIUM": "🟡 中", "LOW": "🟢 低"}.get(x, x)
+                    )
 
-            if report_data.get("complianceStatus"):
-                status = report_data.get("complianceStatus")
-                status_text = {
-                    "COMPLIANT": "✅ 合规",
-                    "NON_COMPLIANT": "⚠️ 不合规",
-                    "SERIOUS_NON_COMPLIANT": "❌ 严重不合规"
-                }.get(status, status)
-                st.metric("合规状态", status_text)
+                    for item in items:
+                        level = item.get("riskLevel")
+                        if level not in level_filter:
+                            continue
 
-            if report_data.get("missingRequiredCount", 0) > 0:
-                st.error(f"缺失必备条款: {report_data.get('missingRequiredCount')}条")
-            if report_data.get("forbiddenClauseCount", 0) > 0:
-                st.error(f"存在禁止条款: {report_data.get('forbiddenClauseCount')}条")
-            if report_data.get("amountViolationCount", 0) > 0:
-                st.warning(f"金额违规: {report_data.get('amountViolationCount')}条")
+                        card_class = f"card card-{level.lower()}"
+                        risk_class = get_risk_class(level)
+                        level_label = {"HIGH": "🔴 高风险", "MEDIUM": "🟡 中风险", "LOW": "🟢 低风险"}.get(level, level)
+                        penalty = item.get("penaltyScore", DEFAULT_WEIGHTS.get(level, 0))
 
-            if report_data.get("sectionRiskDistribution"):
-                try:
-                    dist = json.loads(report_data.get("sectionRiskDistribution"))
-                    if dist:
-                        st.markdown('<p class="sub-header">🔥 章节风险分布</p>', unsafe_allow_html=True)
-                        section_map = {
-                            "PARTIES_INFO": "当事人信息",
-                            "DEFINITIONS": "定义条款",
-                            "RIGHTS_AND_OBLIGATIONS": "权利义务",
-                            "BREACH_LIABILITY": "违约责任",
-                            "DISPUTE_RESOLUTION": "争议解决",
-                            "CONFIDENTIALITY": "保密条款",
-                            "INTELLECTUAL_PROPERTY": "知识产权",
-                            "PAYMENT_TERMS": "付款条款",
-                            "TERM_AND_TERMINATION": "期限与终止",
-                            "FORCE_MAJEURE": "不可抗力",
-                            "MISCELLANEOUS": "其他条款",
-                            "SUPPLEMENTARY": "附则"
-                        }
-                        for section, count in dist.items():
-                            label = section_map.get(section, section)
-                            intensity = min(count * 20, 100)
-                            color = f"rgba(231, 76, 60, {intensity/100})"
-                            st.markdown(
-                                f'<div style="padding: 8px; margin: 4px 0; '
-                                f'background-color: {color}; color: white; '
-                                f'border-radius: 4px;">{label}: {count}个风险</div>',
-                                unsafe_allow_html=True
-                            )
-                except:
-                    pass
+                        with st.expander(
+                            f"{level_label}: {item.get('ruleName')} | 条款: {item.get('clause', {}).get('clauseNumber', 'N/A')} | 扣{penalty}分"
+                        ):
+                            st.markdown(f'<div class="{card_class}">', unsafe_allow_html=True)
+                            st.write("**风险说明:**", item.get("riskDescription"))
+                            st.write(f"**扣分权重:** {penalty}分")
+                            st.write("**原文引用:**")
+                            st.info(item.get("originalText"))
+                            if item.get("matchedText"):
+                                st.write("**匹配内容:**")
+                                st.error(item.get("matchedText"))
+                            st.write("**修改建议:**", item.get("suggestion"))
 
-    else:
-        st.info("暂无风险报告，请先进行风险分析")
+                            if item.get("alternativePhrases"):
+                                with st.expander("💡 参考替代表述"):
+                                    for phrase in item.get("alternativePhrases", "").split("\n"):
+                                        if phrase.strip():
+                                            st.success(phrase.strip())
+
+                            if item.get("fromNlp"):
+                                st.caption("🤖 由NLP辅助识别")
+
+                            st.markdown('</div>', unsafe_allow_html=True)
+
+            with col2:
+                st.markdown('<p class="sub-header">📊 分析摘要</p>', unsafe_allow_html=True)
+                st.info(report_data.get("summary", "暂无摘要"))
+                st.warning(report_data.get("recommendation", "暂无建议"))
+
+                if report_data.get("complianceStatus"):
+                    status = report_data.get("complianceStatus")
+                    status_text = {
+                        "COMPLIANT": "✅ 合规",
+                        "NON_COMPLIANT": "⚠️ 不合规",
+                        "SERIOUS_NON_COMPLIANT": "❌ 严重不合规"
+                    }.get(status, status)
+                    st.metric("合规状态", status_text)
+
+                if report_data.get("missingRequiredCount", 0) > 0:
+                    st.error(f"缺失必备条款: {report_data.get('missingRequiredCount')}条")
+                if report_data.get("forbiddenClauseCount", 0) > 0:
+                    st.error(f"存在禁止条款: {report_data.get('forbiddenClauseCount')}条")
+                if report_data.get("amountViolationCount", 0) > 0:
+                    st.warning(f"金额违规: {report_data.get('amountViolationCount')}条")
+
+                if report_data.get("sectionRiskDistribution"):
+                    try:
+                        dist = json.loads(report_data.get("sectionRiskDistribution"))
+                        if dist:
+                            st.markdown('<p class="sub-header">🔥 章节风险分布</p>', unsafe_allow_html=True)
+                            section_map = {
+                                "PARTIES_INFO": "当事人信息",
+                                "DEFINITIONS": "定义条款",
+                                "RIGHTS_AND_OBLIGATIONS": "权利义务",
+                                "BREACH_LIABILITY": "违约责任",
+                                "DISPUTE_RESOLUTION": "争议解决",
+                                "CONFIDENTIALITY": "保密条款",
+                                "INTELLECTUAL_PROPERTY": "知识产权",
+                                "PAYMENT_TERMS": "付款条款",
+                                "TERM_AND_TERMINATION": "期限与终止",
+                                "FORCE_MAJEURE": "不可抗力",
+                                "MISCELLANEOUS": "其他条款",
+                                "SUPPLEMENTARY": "附则"
+                            }
+                            for section, count in dist.items():
+                                label = section_map.get(section, section)
+                                intensity = min(count * 20, 100)
+                                color = f"rgba(231, 76, 60, {intensity/100})"
+                                st.markdown(
+                                    f'<div style="padding: 8px; margin: 4px 0; '
+                                    f'background-color: {color}; color: white; '
+                                    f'border-radius: 4px;">{label}: {count}个风险</div>',
+                                    unsafe_allow_html=True
+                    )
+                    except:
+                        pass
+
+        else:
+            st.info("暂无风险报告，请先进行风险分析")
+
+    with tab_batch:
+        st.markdown('<p class="sub-header">🔄 批量风险分析</p>', unsafe_allow_html=True)
+
+        contracts = api_call("GET", "/contracts")
+        if contracts and contracts.get("success"):
+            contract_list = contracts.get("data", [])
+
+            if not contract_list:
+                st.info("暂无合同，请先上传合同")
+            else:
+                contract_options = {f"ID:{c.get('id')} - {c.get('title', '无标题')[:40]}": c.get("id") for c in contract_list}
+                selected_labels = st.multiselect(
+                    "选择要分析的合同（可多选）",
+                    list(contract_options.keys())
+                )
+
+                selected_ids = [contract_options[label] for label in selected_labels]
+
+                if selected_ids:
+                    st.info(f"已选择 {len(selected_ids)} 份合同进行批量分析")
+
+                if st.button("🚀 批量分析", type="primary", disabled=not selected_ids):
+                    payload = {"contractIds": selected_ids}
+                    result = api_call("POST", "/risk/batch-analyze", json=payload)
+                    if result and result.get("success"):
+                        batch_id = result.get("data", {}).get("batchId")
+                        st.session_state["batch_id"] = batch_id
+                        st.success(f"批量分析已启动！任务ID: {batch_id}")
+
+                if "batch_id" in st.session_state:
+                    batch_id = st.session_state["batch_id"]
+                    progress_result = api_call("GET", f"/risk/batch-progress/{batch_id}")
+
+                    if progress_result and progress_result.get("success"):
+                        batch_data = progress_result.get("data", {})
+                        total = batch_data.get("total", 0)
+                        completed = batch_data.get("completed", 0)
+                        finished = batch_data.get("finished", False)
+
+                        progress_pct = completed / total if total > 0 else 0
+                        st.progress(progress_pct)
+                        st.info(f"📊 进度: 已完成 {completed}/{total}")
+
+                        if finished:
+                            st.success("✅ 批量分析完成！")
+                            rankings = batch_data.get("rankings", [])
+
+                            if rankings:
+                                st.markdown('<p class="sub-header">🏆 风险评分排名（从高到低）</p>', unsafe_allow_html=True)
+                                for r in rankings:
+                                    score = r.get("riskScore", 0)
+                                    if isinstance(score, (int, float)):
+                                        score_val = int(score)
+                                    else:
+                                        score_val = 0
+
+                                    rank_emoji = "🥇" if r.get("rank") == 1 else "🥈" if r.get("rank") == 2 else "🥉" if r.get("rank") == 3 else f"#{r.get('rank')}"
+
+                                    score_class = get_score_class(score_val)
+                                    st.markdown(
+                                        f'<div class="card" style="border-left-color: {get_risk_color("HIGH") if score_val < 60 else get_risk_color("MEDIUM") if score_val < 80 else get_risk_color("LOW")}">'
+                                        f'{rank_emoji} <b>{r.get("contractTitle", "未知")}</b> - '
+                                        f'评分: <span class="{get_score_class(score_val)}" style="font-size:1.2em">{score_val}/100</span> | '
+                                        f'🔴 {r.get("highRiskCount", 0)} 🟡 {r.get("mediumRiskCount", 0)} 🟢 {r.get("lowRiskCount", 0)} | '
+                                        f'合同ID: {r.get("contractId")}'
+                                        f'</div>',
+                                        unsafe_allow_html=True
+                                    )
+
+                            if st.button("🗑️ 清除批量分析结果"):
+                                del st.session_state["batch_id"]
+                                st.rerun()
+                        else:
+                            st.caption("⏳ 分析进行中，请稍候刷新查看进度...")
+                            time.sleep(2)
+                            st.rerun()
 
 def show_compliance_page():
     st.markdown('<p class="main-header">✅ 合规检查</p>', unsafe_allow_html=True)
@@ -508,6 +593,7 @@ def show_compliance_page():
                 result = api_call("POST", f"/compliance/check/{contract_id}")
                 if result and result.get("success"):
                     st.session_state["compliance_result"] = result.get("data")
+                    st.session_state["compliance_contract_id"] = contract_id
 
         if "compliance_result" in st.session_state:
             data = st.session_state["compliance_result"]
@@ -545,6 +631,16 @@ def show_compliance_page():
 
             if not data.get("missingRequired") and not data.get("forbiddenClauses") and not data.get("amountViolations"):
                 st.success("🎉 恭喜！该合同通过合规检查")
+
+            st.markdown("---")
+            compliance_contract_id = st.session_state.get("compliance_contract_id", contract_id)
+            if st.button("📄 导出PDF报告", type="primary"):
+                pdf_url = f"{API_BASE_URL}/compliance/export-pdf/{compliance_contract_id}"
+                st.markdown(f'<a href="{pdf_url}" download="compliance_report_{compliance_contract_id}.pdf" '
+                            f'style="display:inline-block;padding:10px 20px;background:#2e86c1;color:white;'
+                            f'border-radius:5px;text-decoration:none;font-weight:bold;">'
+                            f'📥 点击下载PDF报告</a>', unsafe_allow_html=True)
+                st.info(f"如果点击无法下载，请直接访问: {pdf_url}")
 
     with tab2:
         st.markdown('<p class="sub-header">📑 合规模板列表</p>', unsafe_allow_html=True)
@@ -680,28 +776,45 @@ def show_approval_page():
             if result and result.get("success"):
                 wf = result.get("data", {})
                 st.info(f"状态: {wf.get('status')} | 当前审批人: {wf.get('currentApprover')}")
+                if wf.get("lastRemindedAt"):
+                    st.caption(f"⏰ 最近催办时间: {wf.get('lastRemindedAt')[:19]}")
 
-        action = st.selectbox(
-            "审批动作",
-            ["APPROVED", "REJECTED", "NEEDS_MODIFICATION"],
-            format_func=lambda x: {
-                "APPROVED": "✅ 同意",
-                "REJECTED": "❌ 拒绝",
-                "NEEDS_MODIFICATION": "📝 需修改"
-            }.get(x, x)
-        )
-        approver = st.text_input("处理人", value="manager")
-        comments = st.text_area("审批意见")
+        col_actions, col_urge = st.columns([3, 1])
 
-        if st.button("💾 提交审批意见", type="primary"):
-            payload = {
-                "action": action,
-                "approver": approver,
-                "comments": comments
-            }
-            result = api_call("POST", f"/approval/process/{workflow_id}", json=payload)
-            if result and result.get("success"):
-                st.success("✅ 审批意见已提交！")
+        with col_actions:
+            action = st.selectbox(
+                "审批动作",
+                ["APPROVED", "REJECTED", "NEEDS_MODIFICATION"],
+                format_func=lambda x: {
+                    "APPROVED": "✅ 同意",
+                    "REJECTED": "❌ 拒绝",
+                    "NEEDS_MODIFICATION": "📝 需修改"
+                }.get(x, x)
+            )
+            approver = st.text_input("处理人", value="manager")
+            comments = st.text_area("审批意见")
+
+            if st.button("💾 提交审批意见", type="primary"):
+                payload = {
+                    "action": action,
+                    "approver": approver,
+                    "comments": comments
+                }
+                result = api_call("POST", f"/approval/process/{workflow_id}", json=payload)
+                if result and result.get("success"):
+                    st.success("✅ 审批意见已提交！")
+
+        with col_urge:
+            st.markdown('<p class="sub-header">🔔 催办</p>', unsafe_allow_html=True)
+            urged_by = st.text_input("催办人", value="demo_user", key="urged_by")
+            if st.button("🔔 催办", type="secondary"):
+                payload = {"remindedBy": urged_by}
+                result = api_call("POST", f"/approval/urge/{workflow_id}", json=payload)
+                if result and result.get("success"):
+                    st.success("✅ 催办成功！审批人将收到催办通知。")
+                    st.rerun()
+                elif result and not result.get("success"):
+                    st.warning(f"⚠️ {result.get('message', '催办失败')}")
 
         st.markdown("---")
         st.markdown('<p class="sub-header">📜 审批记录</p>', unsafe_allow_html=True)
@@ -711,14 +824,24 @@ def show_approval_page():
                 action_icon = {
                     "APPROVED": "✅", "REJECTED": "❌",
                     "NEEDS_MODIFICATION": "📝", "PENDING": "⏳",
-                    "ESCALATED": "⬆️", "UNDER_REVIEW": "🔍"
+                    "ESCALATED": "⬆️", "UNDER_REVIEW": "🔍",
+                    "URGED": "🔔"
                 }.get(r.get("action"), "•")
+                action_label = {
+                    "APPROVED": "同意", "REJECTED": "拒绝",
+                    "NEEDS_MODIFICATION": "需修改", "PENDING": "待审批",
+                    "ESCALATED": "升级", "UNDER_REVIEW": "审核中",
+                    "URGED": "催办"
+                }.get(r.get("action"), r.get("action", ""))
+
                 st.write(
-                    f"{action_icon} **{r.get('action')}** - "
-                    f"{r.get('approver')} | {r.get('createdAt')[:19]}"
+                    f"{action_icon} **{action_label}** - "
+                    f"{r.get('approver')} | {r.get('createdAt')[:19] if r.get('createdAt') else ''}"
                 )
                 if r.get("comments"):
                     st.caption(f"💬 {r.get('comments')}")
+                if r.get("action") == "URGED" and r.get("remindBy"):
+                    st.caption(f"📌 催办人: {r.get('remindBy')}")
 
     with tab3:
         stats = api_call("GET", "/approval/stats")
@@ -732,11 +855,13 @@ def show_approval_page():
             with col3:
                 st.metric("❌ 已拒绝", data.get("rejected", 0))
 
-            col4, col5 = st.columns(2)
+            col4, col5, col6 = st.columns(3)
             with col4:
                 st.metric("📝 需修改", data.get("needsModification", 0))
             with col5:
                 st.metric("⬆️ 已升级", data.get("escalated", 0))
+            with col6:
+                st.metric("🔔 已催办", data.get("urged", 0))
 
 def show_rules_page():
     st.markdown('<p class="main-header">⚙️ 风险规则管理</p>', unsafe_allow_html=True)
@@ -764,6 +889,12 @@ def show_rules_page():
         else:
             cat_filter = []
 
+        st.markdown("---")
+        st.markdown('<p class="sub-header">⚖️ 批量设置权重</p>', unsafe_allow_html=True)
+        st.info("💡 设置自定义扣分权重后，下次分析时将按自定义权重计算。未设置则使用默认值（高风险20分，中风险10分，低风险5分）。")
+
+        weight_changes = {}
+
         for rule in rules_data:
             level = rule.get("riskLevel")
             if level not in level_filter:
@@ -772,14 +903,33 @@ def show_rules_page():
                 continue
 
             level_icon = {"HIGH": "🔴", "MEDIUM": "🟡", "LOW": "🟢"}.get(level, "•")
+            default_weight = DEFAULT_WEIGHTS.get(level, 0)
+            current_weight = rule.get("customWeight")
+
             with st.expander(f"{level_icon} [{level}] {rule.get('ruleName')}"):
-                col1, col2 = st.columns(2)
+                col1, col2, col3 = st.columns([2, 2, 1])
                 with col1:
                     st.write("**分类:**", rule.get("ruleCategory"))
                     st.write("**匹配模式:**", rule.get("matchPattern"))
                 with col2:
                     st.write("**关键词:**", rule.get("keywords"))
                     st.write("**匹配模式:**", rule.get("matchMode"))
+                with col3:
+                    weight_display = current_weight if current_weight is not None else default_weight
+                    st.write(f"**当前扣分:** {weight_display}分")
+                    st.caption(f"(默认: {default_weight}分)")
+
+                new_weight = st.number_input(
+                    "自定义扣分权重",
+                    min_value=0,
+                    max_value=100,
+                    value=current_weight if current_weight is not None else default_weight,
+                    key=f"weight_{rule.get('id')}",
+                    help=f"设置此规则的扣分权重，默认{default_weight}分"
+                )
+
+                if new_weight != default_weight:
+                    weight_changes[rule.get("id")] = new_weight
 
                 st.write("**风险说明:**", rule.get("riskDescription"))
                 st.write("**修改建议:**", rule.get("suggestion"))
@@ -789,6 +939,39 @@ def show_rules_page():
                         for phrase in rule.get("alternativePhrases", "").split("\n"):
                             if phrase.strip():
                                 st.success(phrase.strip())
+
+        if weight_changes:
+            st.markdown("---")
+            st.markdown(f"**📋 待保存的权重变更: {len(weight_changes)} 条规则**")
+            for rid, w in weight_changes.items():
+                rule_name = next((r.get("ruleName") for r in rules_data if r.get("id") == rid), f"规则#{rid}")
+                st.write(f"- {rule_name}: {w}分")
+
+            if st.button("💾 保存权重设置", type="primary"):
+                saved_count = 0
+                for rule_id, weight in weight_changes.items():
+                    rule_data = next((r for r in rules_data if r.get("id") == rule_id), None)
+                    if rule_data:
+                        update_payload = {
+                            "ruleName": rule_data.get("ruleName"),
+                            "matchPattern": rule_data.get("matchPattern"),
+                            "keywords": rule_data.get("keywords"),
+                            "riskLevel": rule_data.get("riskLevel"),
+                            "riskDescription": rule_data.get("riskDescription"),
+                            "suggestion": rule_data.get("suggestion"),
+                            "alternativePhrases": rule_data.get("alternativePhrases"),
+                            "ruleCategory": rule_data.get("ruleCategory"),
+                            "enabled": rule_data.get("enabled", True),
+                            "customWeight": weight
+                        }
+                        result = api_call("PUT", f"/risk/rules/{rule_id}", json=update_payload)
+                        if result and result.get("success"):
+                            saved_count += 1
+
+                if saved_count > 0:
+                    st.success(f"✅ 已保存 {saved_count} 条规则的权重设置！下次分析时将按新权重计算。")
+                else:
+                    st.error("保存失败，请重试")
 
 if __name__ == "__main__":
     main()

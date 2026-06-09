@@ -6,5 +6,6 @@ public enum ApprovalStatus {
     APPROVED,
     REJECTED,
     NEEDS_MODIFICATION,
-    ESCALATED
+    ESCALATED,
+    URGED
 }

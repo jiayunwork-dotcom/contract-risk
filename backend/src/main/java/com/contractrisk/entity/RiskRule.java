@@ -45,6 +45,9 @@ public class RiskRule {
     @Column(name = "rule_category", length = 100)
     private String ruleCategory;
 
+    @Column(name = "custom_weight")
+    private Integer customWeight;
+
     @Column(name = "match_mode", length = 50)
     private String matchMode = "REGEX_KEYWORD";
 

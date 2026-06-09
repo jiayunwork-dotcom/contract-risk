@@ -1,6 +1,7 @@
 package com.contractrisk.controller;
 
 import com.contractrisk.dto.ApiResponse;
+import com.contractrisk.dto.BatchAnalysisResult;
 import com.contractrisk.entity.RiskItem;
 import com.contractrisk.entity.RiskReport;
 import com.contractrisk.entity.RiskRule;
@@ -95,6 +96,7 @@ public class RiskAnalysisController {
                     existing.setAlternativePhrases(rule.getAlternativePhrases());
                     existing.setRuleCategory(rule.getRuleCategory());
                     existing.setEnabled(rule.isEnabled());
+                    existing.setCustomWeight(rule.getCustomWeight());
                     RiskRule saved = riskRuleRepository.save(existing);
                     return ApiResponse.success("规则更新成功", saved);
                 })
@@ -129,5 +131,30 @@ public class RiskAnalysisController {
                 "MEDIUM", mediumCount,
                 "LOW", lowCount
         ));
+    }
+
+    @PostMapping("/batch-analyze")
+    public ApiResponse<Map<String, String>> startBatchAnalysis(@RequestBody Map<String, List<Long>> request) {
+        List<Long> contractIds = request.get("contractIds");
+        if (contractIds == null || contractIds.isEmpty()) {
+            return ApiResponse.error("请选择至少一份合同");
+        }
+        try {
+            String batchId = riskAnalysisService.startBatchAnalysis(contractIds);
+            return ApiResponse.success("批量分析已启动", Map.of("batchId", batchId));
+        } catch (Exception e) {
+            log.error("启动批量分析失败", e);
+            return ApiResponse.error("启动批量分析失败: " + e.getMessage());
+        }
+    }
+
+    @GetMapping("/batch-progress/{batchId}")
+    public ApiResponse<BatchAnalysisResult> getBatchProgress(@PathVariable String batchId) {
+        try {
+            BatchAnalysisResult result = riskAnalysisService.getBatchProgress(batchId);
+            return ApiResponse.success(result);
+        } catch (IllegalArgumentException e) {
+            return ApiResponse.error(e.getMessage());
+        }
     }
 }
