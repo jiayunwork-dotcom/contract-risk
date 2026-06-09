@@ -23,7 +23,7 @@ public interface ApprovalWorkflowRepository extends JpaRepository<ApprovalWorkfl
     List<ApprovalWorkflow> findBySubmittedByOrderByCreatedAtDesc(String submittedBy);
 
     @Query("SELECT aw FROM ApprovalWorkflow aw WHERE aw.status IN (:statuses) " +
-           "AND aw.submittedAt < :cutoffTime AND aw.escalated = false")
+           "AND aw.lastStatusChangedAt < :cutoffTime AND aw.escalated = false")
     List<ApprovalWorkflow> findPendingForEscalation(
             @Param("statuses") List<ApprovalStatus> statuses,
             @Param("cutoffTime") LocalDateTime cutoffTime);

@@ -118,7 +118,7 @@ public class RiskAnalysisController {
         return ApiResponse.success(categories);
     }
 
-    @GetMapping("/stats/levels")
+    @GetMapping("/stats/levels/{contractId}")
     public ApiResponse<Map<String, Long>> getRiskLevelStats(@PathVariable Long contractId) {
         long highCount = riskAnalysisService.getRiskItemsByContractIdAndLevel(contractId, RiskLevel.HIGH).size();
         long mediumCount = riskAnalysisService.getRiskItemsByContractIdAndLevel(contractId, RiskLevel.MEDIUM).size();

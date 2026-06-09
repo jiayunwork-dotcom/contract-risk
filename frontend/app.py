@@ -10,6 +10,21 @@ load_dotenv()
 
 API_BASE_URL = os.getenv("API_BASE_URL", "http://localhost:8080/api")
 
+def resolve_api_base_url():
+    candidates = [API_BASE_URL]
+    if API_BASE_URL != "http://localhost:8080/api":
+        candidates.append("http://localhost:8080/api")
+    for url in candidates:
+        try:
+            resp = requests.get(f"{url}/contracts", timeout=3)
+            if resp.status_code < 500:
+                return url
+        except requests.exceptions.RequestException:
+            continue
+    return API_BASE_URL
+
+API_BASE_URL = resolve_api_base_url()
+
 st.set_page_config(
     page_title="合同条款风险识别与合规审查系统",
     page_icon="📋",
@@ -89,6 +104,12 @@ def api_call(method, endpoint, **kwargs):
         response = requests.request(method, url, timeout=60, **kwargs)
         response.raise_for_status()
         return response.json()
+    except requests.exceptions.ConnectionError:
+        st.error(f"无法连接到后端服务({API_BASE_URL})，请确认后端服务已启动。若通过Docker运行，请检查容器网络配置。")
+        return None
+    except requests.exceptions.Timeout:
+        st.error("请求超时，请稍后重试。")
+        return None
     except requests.exceptions.RequestException as e:
         st.error(f"API请求失败: {str(e)}")
         return None
@@ -144,6 +165,15 @@ def main():
 
 def show_home_page():
     st.markdown('<p class="main-header">📋 合同条款风险识别与合规审查系统</p>', unsafe_allow_html=True)
+
+    try:
+        health = requests.get(f"{API_BASE_URL}/contracts", timeout=5)
+        if health.status_code < 500:
+            st.sidebar.success("🟢 后端服务已连接")
+        else:
+            st.sidebar.error("🔴 后端服务异常")
+    except:
+        st.sidebar.error(f"🔴 后端服务不可达({API_BASE_URL})")
 
     col1, col2, col3, col4 = st.columns(4)
 

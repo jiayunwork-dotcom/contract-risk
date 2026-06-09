@@ -45,6 +45,9 @@ public class ApprovalWorkflow {
     @Column(name = "submitted_at")
     private LocalDateTime submittedAt;
 
+    @Column(name = "last_status_changed_at")
+    private LocalDateTime lastStatusChangedAt;
+
     @Column(name = "last_reminded_at")
     private LocalDateTime lastRemindedAt;
 

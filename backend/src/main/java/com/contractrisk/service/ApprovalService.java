@@ -56,6 +56,7 @@ public class ApprovalService {
         }
 
         workflow.setSubmittedAt(LocalDateTime.now());
+        workflow.setLastStatusChangedAt(LocalDateTime.now());
         workflow = workflowRepository.save(workflow);
 
         ApprovalRecord record = new ApprovalRecord();
@@ -103,6 +104,7 @@ public class ApprovalService {
                     workflow.setStatus(ApprovalStatus.UNDER_REVIEW);
                     workflow.setCurrentLevel(2);
                     workflow.setEscalatedApprover("senior_approver");
+                    workflow.setLastStatusChangedAt(LocalDateTime.now());
                     log.info("一级审批通过，进入二级审批，工作流ID: {}", workflowId);
                 } else {
                     workflow.setStatus(ApprovalStatus.APPROVED);
@@ -136,6 +138,7 @@ public class ApprovalService {
         workflow.setEscalatedApprover(escalatedApprover);
         workflow.setStatus(ApprovalStatus.ESCALATED);
         workflow.setCurrentLevel(workflow.getCurrentLevel() + 1);
+        workflow.setLastStatusChangedAt(LocalDateTime.now());
 
         ApprovalRecord record = new ApprovalRecord();
         record.setWorkflow(workflow);
